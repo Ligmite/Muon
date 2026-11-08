@@ -111,28 +111,47 @@ fn mu_fresnel_water_air(cos_i_in: f32) -> f32 {
 //   Water
 // ---------------------------------------------------------------------
 
-// A small directional swell plus two scales of chop. Domain-warping the wave
-// coordinates and modulating the swell's amplitude with low-frequency noise is
-// what stops the wave trains from running in straight parallel lines across a
-// whole lake; it is the cheap analogue of an FFT ocean spectrum.
+// Photon-style wave field: three octaves of a squared-sine ("Gerstner")
+// profile, each octave rotated by the golden angle, with a tiling noise texture
+// added to the phase so crests do not line up. Deep-water dispersion sets the
+// speed, so long waves outrun short ones.
+fn mu_gerstner(coord: vec2<f32>, dir: vec2<f32>, t: f32, noise: f32, wavelength: f32) -> f32 {
+    let k = 6.2831853 / max(wavelength, 1e-3);
+    let w = sqrt(9.8 * k);
+    let x = w * t - k * (dot(dir, coord) + noise);
+    let s = sin(x) * 0.5 + 0.5;
+    return s * s;
+}
+
 fn mu_water_height(p: vec2<f32>) -> f32 {
-    let t = frame.time * water_speed;
-    let w1 = mu_vnoise2(p * 0.012 + vec2<f32>(t * 0.030, 0.0)) - 0.5;
-    let w2 = mu_vnoise2(p * 0.012 + vec2<f32>(5.2, t * 0.025)) - 0.5;
-    let q = p + vec2<f32>(w1, w2) * 30.0;
-
-    // Only two broad swell directions; the texture of the surface comes from
-    // the noise gradient below, which is isotropic and cannot form a grid.
-    var h = 0.0;
-    h = h + sin(dot(q, normalize(vec2<f32>(0.83, 0.56))) * 0.32 - t * 0.80) * 0.55;
-    h = h + sin(dot(q, normalize(vec2<f32>(-0.42, 0.91))) * 0.62 - t * 1.10) * 0.30;
-    let swell = 0.65 + 0.35 * mu_vnoise2(p * 0.004 + vec2<f32>(3.1, 7.7));
-    h = h * swell;
-
-    let c1 = mu_vnoise2(p * 0.12 + vec2<f32>(t * 0.08, 0.0)) - 0.5;
-    let c2 = mu_vnoise2(p * 0.35 - vec2<f32>(0.0, t * 0.11)) - 0.5;
-    let c3 = mu_vnoise2(p * 0.90 + vec2<f32>(t * 0.17, t * 0.07)) - 0.5;
-    return h + c1 * 0.90 + c2 * 0.55 + c3 * 0.30;
+    let t = 0.5 * frame.time * water_speed;
+    var coord = p;
+    // The wind direction itself changes slowly across the lake, so wave trains
+    // are not all parallel to one shore-to-shore axis.
+    let wind_angle = 0.5235988 + (mu_vnoise2(p * 0.0060 + vec2<f32>(3.1, 7.7)) - 0.5) * 1.40;
+    var dir = vec2<f32>(cos(wind_angle), sin(wind_angle));
+    let cr = cos(2.3999632);
+    let sr = sin(2.3999632);
+    var noise_coord = (p + vec2<f32>(0.0, 0.25 * t)) * 0.007;
+    var amp = 1.0;
+    var freq = 0.60;
+    var wl = 1.6;
+    var height = 0.0;
+    var norm = 0.0;
+    for (var i = 0; i < 3; i = i + 1) {
+        let n = textureSampleLevel(water_noise, water_noise_sampler, noise_coord, 0.0).r * 2.0;
+        height = height + mu_gerstner(coord * freq, dir, t, n, wl) * amp;
+        norm = norm + amp;
+        amp = amp * 0.5;
+        freq = freq * 1.7;
+        wl = wl * 1.5;
+        noise_coord = noise_coord * 2.5;
+        dir = vec2<f32>(cr * dir.x - sr * dir.y, sr * dir.x + cr * dir.y);
+    }
+    let hv = textureSampleLevel(water_noise, water_noise_sampler,
+                                (p + vec2<f32>(0.0, 0.1 * t)) * 0.001, 0.0).r;
+    let variation = max(0.4, hv * 2.0 - 0.5);
+    return (height / max(norm, 1e-5)) * variation;
 }
 
 // Water normal in world axes. For the top face it points up, for the underside
@@ -142,23 +161,23 @@ fn mu_water_normal(input: MaterialInput, flat_normal: vec3<f32>) -> vec3<f32> {
     if (abs(flat.y) < 0.5) {
         return flat;
     }
-    // Anchor the wave field to the world, not to the camera.
-    let p = input.position.xz + frame.camera_position.xz;
-    let e = 0.20;
+    // Photon uses the negative tangent-space coordinate for the top face so
+    // the wind direction lines up across the surface.
+    let p = -(input.position.xz + frame.camera_position.xz);
+    let e = 0.1;
     let h0 = mu_water_height(p);
     let hx = mu_water_height(p + vec2<f32>(e, 0.0));
     let hz = mu_water_height(p + vec2<f32>(0.0, e));
     let dist = length(input.position);
     let view = normalize(-input.position);
-    let grazing = smoothstep(0.0, 0.20, abs(dot(flat, view)));
-    // Fade the normal by the world size of one pixel: at distance the waves
-    // are smaller than a texel and would otherwise alias into a crosshatch.
-    let footprint = max(length(dpdx(input.position.xz)), length(dpdy(input.position.xz)));
-    let pixel_fade = 1.0 / (1.0 + footprint * 2.0);
-    let far = (1.0 / (1.0 + dist * 0.020)) * pixel_fade;
-    let sky_damp = mix(0.035, 1.0, mu_sat(input.light.y));
-    let influence = (0.220 + 0.080 * frame.rain) * water_waves * sky_damp * grazing * far;
-    var n = normalize(vec3<f32>(-(hx - h0) / e * influence, 1.0, -(hz - h0) / e * influence));
+    let grazing = smoothstep(0.0, 0.15, abs(dot(flat, view)));
+    let sky_damp = mix(0.02, 1.0, mu_sat(input.light.y));
+    // Keep a low-frequency component at distance: a perfectly flat far mirror
+    // is what made the lake read as glass.
+    let far = max(0.35, 1.0 / (1.0 + dist * 0.020));
+    let influence = mix(0.012, 0.040 + 0.150 * frame.rain, sky_damp)
+        * water_waves * grazing * far;
+    var n = normalize(vec3<f32>((hx - h0) / e * influence, 1.0, (hz - h0) / e * influence));
     if (flat.y < 0.0) { n = -n; }
     return n;
 }
@@ -193,7 +212,7 @@ fn mu_water_top(input: MaterialInput, flat: vec3<f32>) -> vec4<f32> {
     let screen = clamp(vec2<i32>(input.screen * frame.resolution),
                        vec2<i32>(0), vec2<i32>(frame.resolution) - vec2<i32>(1));
     let wave = n.xz - flat.xz;
-    let offset = vec2<i32>(wave * (26.0 * water_refraction / (1.0 + dist * 0.05)));
+    let offset = vec2<i32>(wave * (60.0 * water_refraction / (1.0 + dist * 0.05)));
     let limit = vec2<i32>(frame.resolution) - vec2<i32>(1);
     let screen_r = clamp(screen + offset, vec2<i32>(0), limit);
     let straight_e = textureLoad(opaque_color, screen, 0).rgb;
@@ -219,7 +238,7 @@ fn mu_water_top(input: MaterialInput, flat: vec3<f32>) -> vec4<f32> {
     // stair-steps without smearing the whole reflection.
     var reflected = vec3<f32>(0.0);
     if (reflections && frame.has_reflection == 1u) {
-        let ruv = clamp(input.screen + wave * 0.16, vec2<f32>(0.002), vec2<f32>(0.998));
+        let ruv = clamp(input.screen + wave * 0.45, vec2<f32>(0.002), vec2<f32>(0.998));
         let px = vec2<f32>(1.5) / frame.resolution;
         let c0 = textureSampleLevel(reflection, reflection_sampler, ruv, 0.0).rgb;
         let c1 = textureSampleLevel(reflection, reflection_sampler, ruv + vec2<f32>(px.x, 0.0), 0.0).rgb;

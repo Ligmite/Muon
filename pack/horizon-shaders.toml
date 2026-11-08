@@ -1,7 +1,7 @@
 schema = 1
 id = "muon"
 name = "Muon"
-version = "0.4.3"
+version = "0.4.5"
 api = "0.1"
 description = "Muon: an independent Photon-inspired Horizon shader with a real sun/moon shadow map, cloud shadows, an irregular deep-water wave spectrum, the engine water mirror, volumetric cumulus in the sky stage, GTAO, SSR, screen-space volumetric light, bloom, a filmic colour grade, a display-referred LUT and HDR output. Credits in README.md."
 shared = ["common.wgsl"]
@@ -46,6 +46,13 @@ file = "lut.png"
 filter = "linear"
 wrap = "clamp"
 
+# Tileable value noise used as the phase input of the wave octaves.
+[[textures]]
+id = "water_noise"
+file = "water_noise.png"
+filter = "linear"
+wrap = "repeat"
+
 # Sprite ids the material stage uses to recognise foliage. A stage sees the
 # sprite, not the block, so these match every leaves/plant sprite.
 [[materials]]
@@ -76,6 +83,10 @@ name = "SSR"
 [[post]]
 file = "post/volumetrics.wgsl"
 name = "Volumetric light, haze and water fog"
+
+[[post]]
+file = "post/clouds.wgsl"
+name = "Volumetric clouds"
 
 [[post]]
 file = "post/grade.wgsl"
@@ -110,7 +121,7 @@ default = "Lottes (default)"
 id = "grade_brightness"
 name = "Brightness"
 type = "float"
-default = 1.0
+default = 1.05
 min = 0.0
 max = 2.0
 step = 0.01
@@ -119,7 +130,7 @@ step = 0.01
 id = "grade_contrast"
 name = "Contrast"
 type = "float"
-default = 1.05
+default = 1.08
 min = 0.0
 max = 2.0
 step = 0.01
@@ -128,7 +139,7 @@ step = 0.01
 id = "grade_saturation"
 name = "Saturation"
 type = "float"
-default = 1.0
+default = 1.12
 min = 0.0
 max = 2.0
 step = 0.01
@@ -137,7 +148,7 @@ step = 0.01
 id = "grade_orange_boost"
 name = "Orange saturation boost"
 type = "float"
-default = 0.0
+default = 0.06
 min = -0.5
 max = 0.5
 step = 0.01
@@ -155,7 +166,7 @@ step = 0.01
 id = "grade_green_boost"
 name = "Green saturation boost"
 type = "float"
-default = -0.08
+default = -0.06
 min = -0.5
 max = 0.5
 step = 0.01
@@ -444,7 +455,7 @@ default = true
 id = "cloud_coverage"
 name = "Cloud coverage"
 type = "float"
-default = 0.35
+default = 0.32
 min = 0.0
 max = 1.0
 step = 0.05
@@ -565,6 +576,76 @@ default = 1.0
 min = 0.0
 max = 1.0
 step = 0.05
+
+# --- the options page ------------------------------------------------------
+# Photon-style category pages. The first page is the menu; every page has to
+# be reachable from it, and every option has to appear on exactly one page.
+
+[[pages]]
+id = "main"
+name = "Muon"
+columns = 1
+items = ["page:general", "page:world", "page:lighting", "page:sky", "page:fog", "page:materials", "page:water", "page:post", "page:misc", "page:hdr"]
+
+[[pages]]
+id = "general"
+name = "General"
+description = "Exposure, tone mapping and the filmic grade."
+items = ["exposure_ev", "tonemap_op", "grade_brightness", "grade_contrast", "grade_saturation", "grade_orange_boost", "grade_teal_boost", "grade_green_boost", "grade_green_hue", "vignette_intensity"]
+
+[[pages]]
+id = "world"
+name = "World"
+description = "Sun, shadows and ambient light."
+items = ["sun_intensity", "shadows_enabled", "shadow_softness", "shadow_strength", "ambient_intensity"]
+
+[[pages]]
+id = "lighting"
+name = "Lighting"
+description = "Screen-space occlusion and surface response."
+items = ["ao_strength", "ao_radius"]
+
+[[pages]]
+id = "sky"
+name = "Sky"
+description = "Atmosphere, clouds and the horizon haze."
+items = ["sky_intensity", "sky_saturation", "sky_fog_blend", "clouds_enabled", "cloud_coverage", "cloud_density"]
+
+[[pages]]
+id = "fog"
+name = "Fog"
+description = "Aerial haze, sun shafts and underwater absorption."
+items = ["fog_density", "vl_intensity", "underwater_density"]
+
+[[pages]]
+id = "materials"
+name = "Materials"
+description = "Diffuse wrap, foliage translucency and emission."
+items = ["diffuse_wrap", "sss_strength", "emission_strength"]
+
+[[pages]]
+id = "water"
+name = "Water"
+description = "Waves, the engine mirror, refraction and SSR."
+items = ["water_waves", "water_speed", "water_fog", "water_fresnel", "water_refraction", "reflections", "ssr_mode", "ssr_intensity"]
+
+[[pages]]
+id = "post"
+name = "Post-Processing"
+description = "Bloom, flare, antialiasing and the LUT."
+items = ["bloom_intensity", "bloom_spread", "bloom_threshold", "lens_flare", "lens_flare_intensity", "fxaa_enabled", "cas_enabled", "cas_intensity", "dither_enabled", "lut_enabled", "lut_strength"]
+
+[[pages]]
+id = "misc"
+name = "Misc"
+description = "Exposure adaptation and output."
+items = ["auto_exposure", "ae_bias", "ae_min", "ae_max", "output_linear"]
+
+[[pages]]
+id = "hdr"
+name = "HDR"
+description = "HDR output and display levels."
+items = ["hdr_enabled", "hdr_peak_nits", "hdr_paper_white"]
 
 [budget]
 gpu_ms = 10.0

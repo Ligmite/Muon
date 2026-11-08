@@ -53,7 +53,7 @@ python tools/cube_to_lut_png.py my_look.cube pack/lut.png --blue-fastest
 **Zip install:**
 
 ```sh
-python tools/pack_muon.py pack muon-0.4.3.hshader
+python tools/pack_muon.py pack muon-0.4.5.hshader
 ```
 
 Copy the new `.hshader` over the old one in `shaderpacks/` and reload the pack.

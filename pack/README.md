@@ -1,10 +1,35 @@
-# Muon 0.4.3
+# Muon 0.4.5
 
 **Muon** is an independent WGSL shader for Horizon's shader API 0.1 (sky +
 material + weather + post), made in the spirit of SixthSurge's Photon. Muon's
 grade keeps the shape of Photon's `c19_color_grading` (Lottes default, 18% grey
 log-contrast, hue-band saturation, split tone, vignette) and its HDR path keeps
 the filmic toe with a soft shoulder at the display peak.
+
+## What changed in 0.4.5
+
+* **Clouds have a 3D coverage field.** The 2D chart is now perturbed at the
+  sample by 3D noise with a height-dependent threshold, and an egg-shaped
+  altitude profile thins bases and tops. Bases vary up to ±140 blocks and
+  thickness 50–150%.
+* **Water breaks its directional lock.** Wind direction now varies slowly across
+  the surface; the base wavelength is larger and the octaves still rotate by the
+  golden angle.
+* **Warmer, more vibrant grade.** Higher brightness/saturation/contrast, a
+  stronger amber-highlight / cool-shadow split and a small global warm bias.
+
+## What changed in 0.4.4
+
+* **Photon-style wave field.** Three squared-sine octaves with deep-water
+  dispersion, golden-angle rotation and a tiling noise texture in the phase
+  replace the procedural value noise. The normal is deliberately small; the
+  mirror/refraction distortion and broader glint make it visible.
+* **Clouds in a depth-aware post pass.** The deck is raymarched from the world
+  camera and stopped at scene depth, so it is visible from above and can occlude
+  terrain. Covers are smaller and more separated, with ±95-block base variation
+  and 55–145% thickness variation.
+* **Photon-style options pages:** General, World, Lighting, Sky, Fog, Materials,
+  Water, Post-Processing, Misc and HDR.
 
 ## What changed in 0.4.3
 
@@ -65,9 +90,9 @@ the filmic toe with a soft shoulder at the display peak.
   detail at distance instead of printing black.
 * **No vanilla clouds, sun or stars.** The manifest sets
   `[sky] clouds = false`, `sun = false`, `stars = false`, and the sky stage
-  draws the atmosphere, sun, stars and the volumetric cloud layer itself. This
-  also fixes the sky sliding under the player: the clouds are ray-marched from
-  the world camera position in the sky pass, not reconstructed in a post pass.
+  draws the atmosphere, sun and stars. The clouds are a depth-aware post pass
+  ray-marched from the world camera position, so they stay world-locked and are
+  visible from above as well as below.
 * **A real shadow map.** `[shadow]` (2048², 128 blocks, cutout leaves/plants
   solid) gives cast shadows from the sun by day and the moon by night, with
   3×3 PCF and translucent-colour tinting.
@@ -87,8 +112,8 @@ the filmic toe with a soft shoulder at the display peak.
 | GTAO | Depth-only GTAO, 4 slices × 5 steps, bilateral denoise |
 | SSR | Depth march, water (and optional wet ground) |
 | Volumetric light | Screen-space sun shafts + haze (no shadow-map raymarch) |
-| Water | Domain-warped height field, engine mirror, refraction, absorption, Snell's window from below |
-| Clouds | Volumetric cumulus in the sky stage, cloud-shadow chart on terrain |
+| Water | Three-octave noise-textured wave field, engine mirror, refraction, absorption, Snell's window from below |
+| Clouds | Depth-aware volumetric cumulus in post, cloud-shadow chart on terrain |
 | LUT | 33³ display-referred atlas, `.cube` converter included |
 | Aurora, SSS, LPV coloured light, DOF, motion blur, TAA, rain puddles | Not in this pack |
 

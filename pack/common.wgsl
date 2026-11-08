@@ -6,12 +6,12 @@
 
 override exposure_ev: f32 = 0.0;
 override tonemap_op: u32 = 0u;
-override grade_brightness: f32 = 1.0;
-override grade_contrast: f32 = 1.05;
-override grade_saturation: f32 = 1.0;
-override grade_orange_boost: f32 = 0.0;
-override grade_teal_boost: f32 = 0.05;
-override grade_green_boost: f32 = -0.08;
+override grade_brightness: f32 = 1.05;
+override grade_contrast: f32 = 1.08;
+override grade_saturation: f32 = 1.12;
+override grade_orange_boost: f32 = 0.06;
+override grade_teal_boost: f32 = 0.04;
+override grade_green_boost: f32 = -0.06;
 override grade_green_hue: f32 = 0.0;
 override vignette_intensity: f32 = 1.0;
 override bloom_intensity: f32 = 1.0;
@@ -58,7 +58,7 @@ override lut_strength: f32 = 1.0;
 override underwater_density: f32 = 0.6;
 override clouds_enabled: bool = true;
 override ambient_intensity: f32 = 1.0;
-override cloud_coverage: f32 = 0.35;
+override cloud_coverage: f32 = 0.32;
 override cloud_density: f32 = 1.0;
 
 const MU_PI: f32 = 3.14159265;
@@ -212,7 +212,8 @@ fn mu_grade_output(rgb_in: vec3<f32>) -> vec3<f32> {
     let l = mu_luma709(rgb);
     let highs = smoothstep(0.30, 1.0, l);
     let shadows = 1.0 - smoothstep(0.0, 0.60, l);
-    rgb = rgb * mix(vec3<f32>(0.92, 0.99, 1.08), vec3<f32>(1.10, 1.02, 0.90), highs);
+    rgb = rgb * vec3<f32>(1.03, 1.00, 0.96);
+    rgb = rgb * mix(vec3<f32>(0.90, 0.98, 1.10), vec3<f32>(1.16, 1.03, 0.86), highs);
     rgb = rgb * mix(1.0, 1.05, shadows);
 
     // A small S-curve for contrast and colour separation.
@@ -522,11 +523,11 @@ fn mu_billow3(p0: vec3<f32>, octaves: i32) -> f32 {
 // masses: a vertical ray either enters a cloud column or it does not.
 fn mu_cloud_map(p: vec2<f32>) -> f32 {
     let wind = vec2<f32>(frame.time * 2.0, frame.time * 0.65);
-    let q = (p + wind) * 0.0040;
+    let q = (p + wind) * 0.0060;
     let big = mu_fbm2(q, 4);
     let mid = mu_fbm2(q * 3.1 + vec2<f32>(11.0, 7.0), 3);
     let fine = mu_fbm2(q * 9.0 + vec2<f32>(3.0, 19.0), 2);
-    return mu_sat((big - 0.48) * 3.2 + (mid - 0.5) * 0.30 + (fine - 0.5) * 0.10 + 0.5);
+    return mu_sat((big - 0.48) * 3.2 + (mid - 0.5) * 0.30 + (fine - 0.5) * 0.06 + 0.5);
 }
 
 // Project the point toward the sun onto the cloud base and read the coverage
@@ -548,29 +549,35 @@ fn mu_cloud_shadow(world_pos: vec3<f32>) -> f32 {
 // Each cloud column gets its own base and thickness, so the deck is not one
 // perfectly level slab.
 fn mu_cloud_height(p: vec3<f32>, base: f32, thick: f32) -> f32 {
-    // A cloud column can sit up to ~95 blocks above/below the nominal base and
-    // be 55–145% as thick; this is the vertical break-up the deck needs.
-    let off = (mu_noise2(p.xz * 0.0026 + vec2<f32>(frame.time * 0.008, 3.0)) - 0.5) * 190.0;
-    let scale = 0.55 + 0.90 * mu_noise2(p.xz * 0.0017 + vec2<f32>(7.0, 1.0));
+    // A cloud column can sit up to ~140 blocks above/below the nominal base and
+    // be 50–150% as thick; this is the vertical break-up the deck needs.
+    let off = (mu_noise2(p.xz * 0.0024 + vec2<f32>(frame.time * 0.008, 3.0)) - 0.5) * 280.0;
+    let scale = 0.50 + 1.00 * mu_noise2(p.xz * 0.0015 + vec2<f32>(7.0, 1.0));
     return (p.y - base - off) / max(thick * scale, 1e-3);
 }
 
 fn mu_cloud_density(p: vec3<f32>, base: f32, thick: f32, coverage: f32) -> f32 {
     let h = mu_cloud_height(p, base, thick);
     if (h <= 0.0 || h >= 1.0) { return 0.0; }
-    let thr = 0.72 - coverage * 0.36;
-    let mask = smoothstep(thr, thr + 0.12, mu_cloud_map(p.xz));
+    // Coverage is resolved in 3D, not just on the base plane: the same column
+    // can be present at one altitude and eroded at another, which is what stops
+    // the deck reading as an extruded 2D mask.
+    let cov = mu_cloud_map(p.xz);
+    let cov3 = mu_noise3(p * vec3<f32>(0.0040, 0.0080, 0.0040)
+                         + vec3<f32>(frame.time * 0.010, 0.0, frame.time * 0.006)) - 0.5;
+    let thr = 0.72 - coverage * 0.36 + (h - 0.5) * 0.12;
+    let mask = smoothstep(thr, thr + 0.14, cov + cov3 * 0.42);
     let t = frame.time;
-    // Two scales: the low one builds the towers, the high one eats their edges
-    // into cauliflower detail instead of leaving a smooth white block.
-    let q = vec3<f32>(p.x + t * 1.2, p.y * 1.5, p.z + t * 0.5) * 0.0060;
-    let billow = mu_billow3(q, 3);
-    let q2 = vec3<f32>(p.x - t * 0.7, p.y * 2.3, p.z + t * 0.9) * 0.014;
-    let erode = mu_billow3(q2, 2);
-    let edge = smoothstep(0.28, 0.68, billow);
-    let detail = edge * mix(0.55, 1.0, erode);
-    let profile = smoothstep(0.0, 0.12, h) * (1.0 - smoothstep(0.60, 1.0, h));
-    return mask * detail * profile * cloud_density;
+    let q = vec3<f32>(p.x + t * 1.2, p.y * 1.5, p.z + t * 0.5) * 0.0055;
+    let billow = mu_billow3(q, 4);
+    let q2 = vec3<f32>(p.x - t * 0.7, p.y * 2.3, p.z + t * 0.9) * 0.020;
+    let erode = mu_billow3(q2, 3);
+    let edge = smoothstep(0.26, 0.70, billow);
+    let detail = edge * mix(0.45, 1.0, erode);
+    let profile = smoothstep(0.0, 0.12, h) * (1.0 - smoothstep(0.55, 1.0, h));
+    // Carve an egg shape: dense middle, thinner base and top.
+    let egg = smoothstep(0.20, 0.85, h) * 0.35;
+    return max(mask * detail * profile - egg * 0.12, 0.0) * cloud_density;
 }
 
 fn mu_cloud_lighting(p: vec3<f32>, density: f32, base: f32, thick: f32, coverage: f32) -> vec3<f32> {
@@ -589,32 +596,34 @@ fn mu_cloud_lighting(p: vec3<f32>, density: f32, base: f32, thick: f32, coverage
     let day = smoothstep(-0.08, 0.12, sun.y);
     let warmth = 1.0 - smoothstep(0.0, 0.35, sun.y);
     let sun_color = mix(vec3<f32>(1.0), vec3<f32>(1.0, 0.58, 0.31), warmth * day);
-    let sun_radiance = mix(vec3<f32>(0.28, 0.36, 0.55) * 0.10, sun_color * 2.40, day);
+    let sun_radiance = mix(vec3<f32>(0.28, 0.36, 0.55) * 0.10, sun_color * 1.80, day);
     let h = mu_sat(mu_cloud_height(p, base, thick));
     let ambient = mix(frame.fog_color * 0.65, frame.sky_color * 1.00, 0.6) * (0.30 + 0.70 * h) * day;
-    return ambient + sun_radiance * (beer * 0.72 + multi * 0.28) * (0.35 + 0.65 * powder);
+    let sun_term = sun_radiance * (beer * 0.72 + multi * 0.28) * (0.35 + 0.65 * powder) * mix(0.55, 1.0, h);
+    return ambient + sun_term;
 }
 
 // Volumetric cumulus. The layer is anchored in the world (camera position is
 // the ray origin), so walking moves the clouds by their real parallax. The
-// march is capped and faded before the ray gets too shallow.
-fn mu_clouds(dir: vec3<f32>) -> vec4<f32> {
-    let origin = frame.camera_position;
+// interval is intersected generically, which lets the post pass draw the deck
+// from above as well as from below.
+fn mu_clouds(origin: vec3<f32>, dir: vec3<f32>, max_dist: f32) -> vec4<f32> {
     let wet = mu_wetness();
     let base = mix(380.0, 280.0, wet);
     let thick = mix(160.0, 120.0, wet) + 100.0 * frame.thunder;
     let coverage = clamp(cloud_coverage + 0.30 * wet, 0.0, 1.0);
-    if (dir.y <= 0.005) { return vec4<f32>(0.0, 0.0, 0.0, 1.0); }
+    if (abs(dir.y) < 1e-4) { return vec4<f32>(0.0, 0.0, 0.0, 1.0); }
 
-    var t0 = (base - origin.y) / dir.y;
-    if (t0 < 0.0) { t0 = 0.0; }
-    let t1 = (base + thick - origin.y) / dir.y;
-    if (t1 <= 0.0 || t0 > 6000.0) { return vec4<f32>(0.0, 0.0, 0.0, 1.0); }
-    let t_end = min(t1, t0 + 6000.0);
-    if (t_end <= t0) { return vec4<f32>(0.0, 0.0, 0.0, 1.0); }
+    let tb = (base - origin.y) / dir.y;
+    let tt = (base + thick - origin.y) / dir.y;
+    var t0 = max(min(tb, tt), 0.0);
+    var t1 = min(max(tb, tt), max_dist);
+    if (t1 <= t0) { return vec4<f32>(0.0, 0.0, 0.0, 1.0); }
+    t0 = min(t0, 6000.0);
+    t1 = min(t1, t0 + 6000.0);
 
     let steps = 20;
-    let step_len = (t_end - t0) / f32(steps);
+    let step_len = (t1 - t0) / f32(steps);
     let jitter = mu_hash3(dir * 811.0);
     var t = t0 + step_len * jitter;
     var trans = 1.0;
@@ -626,7 +635,7 @@ fn mu_clouds(dir: vec3<f32>) -> vec4<f32> {
         let density = mu_cloud_density(p, base, thick, coverage);
         if (density > 0.002) {
             let lit = mu_cloud_lighting(p, density, base, thick, coverage);
-            let extinction = density * 0.13 * step_len;
+            let extinction = density * 0.16 * step_len;
             let sample_trans = exp(-extinction);
             scattered = scattered + trans * (1.0 - sample_trans) * lit;
             trans = trans * sample_trans;
@@ -634,7 +643,7 @@ fn mu_clouds(dir: vec3<f32>) -> vec4<f32> {
         t = t + step_len;
     }
 
-    let horizon = smoothstep(0.005, 0.08, dir.y);
+    let horizon = select(1.0, smoothstep(0.005, 0.08, dir.y), dir.y > 0.0);
     let fade = exp(-t0 * 0.00035) * horizon;
     return vec4<f32>(scattered * fade, mix(1.0, trans, fade));
 }
@@ -689,10 +698,9 @@ fn mu_sky_encoded(dir: vec3<f32>, full: bool) -> vec3<f32> {
             radiance = radiance + vec3<f32>(0.9, 0.95, 1.0) * (star * b * 1.0 * night * clear * smoothstep(0.02, 0.25, dir.y));
         }
 
-        if (clouds_enabled) {
-            let cl = mu_clouds(dir);
-            radiance = radiance * cl.w + cl.xyz;
-        }
+        // Clouds are composited in the depth-aware post pass, not here: a sky
+        // shader only covers rays above the horizon and would lose the deck
+        // when the camera flies above it.
     }
 
     var encoded = mu_scene_encode(radiance);

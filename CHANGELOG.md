@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.5
+
+- Clouds: 3D coverage perturbation, height-dependent threshold, egg-shaped
+  altitude profile; base variation up to ±140 blocks, thickness 50–150%.
+- Water: wind direction varies across the lake, larger base wavelength; the
+  golden-angle octave stack and noise phase remain.
+- Grade: warmer, brighter and more saturated; stronger split tone.
+
+## 0.4.4
+
+- Photon-style wave field: three squared-sine octaves, deep-water dispersion,
+  golden-angle rotation and a tiling noise texture in the phase; small normal,
+  stronger reflection/refraction distortion and a broader glint.
+- Clouds moved to a depth-aware post pass, so they are visible from above and
+  occlude terrain correctly. Coverage is smaller, bases vary ±95 blocks and
+  thickness 55–145%, with more contrast between lit tops and shaded bases.
+- Photon-style Shader Options pages: General, World, Lighting, Sky, Fog,
+  Materials, Water, Post-Processing, Misc, HDR.
+
 ## 0.4.3
 
 - Stronger water normals, much stronger mirror/refraction distortion, a broader
