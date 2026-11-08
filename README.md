@@ -24,22 +24,6 @@ Current release: **0.4.5** · shader API **0.1** · MIT
 | **Weather** | lit rain/snow streaks, suppressed while underwater |
 | **UI** | Photon-style option pages: General · World · Lighting · Sky · Fog · Materials · Water · Post-Processing · Misc · HDR |
 
-## How a frame is built
-
-```
-sky stage ────────────────┐
-material stage (opaque) ──┼─► GTAO ─► AO denoise ─► SSR ─► volumetrics
-material stage (water) ───┘                                      │
-                                                                 ▼
-                                                              clouds
-                                                                 │
-                    final ◄─ FXAA ◄─ grade/bloom/LUT ◄───────────┘
-```
-
-The world is still culled, batched and meshed by Horizon. Muon only replaces
-what the stages mean: sky radiance, terrain response, water response and the
-post chain.
-
 ---
 
 # Under the hood
