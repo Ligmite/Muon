@@ -9,7 +9,7 @@ The look is inspired by [Photon](https://github.com/SixthSurge/Photon) by
 SixthSurge. The WGSL in this repository is Muon's own implementation; the design
 notes below explain the choices rather than hiding them behind a preset.
 
-Current release: **0.4.5** · shader API **0.1** · MIT
+Current release: **0.4.5** · shader API **0.1**
 
 ## At a glance
 
