@@ -50,10 +50,20 @@ python tools/cube_to_lut_png.py my_look.cube pack/lut.png --blue-fastest
 
 ## 3. Repack or hot-reload
 
-**Zip install:**
+**Release bundle (one step):** the `muon-download` release contains the built
+shader and the converter. `--pack` replaces the atlas inside the `.hshader`
+directly, so no unzip/rezip is needed:
 
 ```sh
-python tools/pack_muon.py pack muon-0.4.5.hshader
+python cube_to_lut_png.py my_look.cube lut.png --pack muon-0.5.0.hshader
+```
+
+Copy the rewritten `.hshader` into `shaderpacks/` and reload the pack.
+
+**Zip install from the repository:**
+
+```sh
+python tools/pack_muon.py pack muon-0.5.0.hshader
 ```
 
 Copy the new `.hshader` over the old one in `shaderpacks/` and reload the pack.

@@ -111,47 +111,72 @@ fn mu_fresnel_water_air(cos_i_in: f32) -> f32 {
 //   Water
 // ---------------------------------------------------------------------
 
-// Photon-style wave field: three octaves of a squared-sine ("Gerstner")
-// profile, each octave rotated by the golden angle, with a tiling noise texture
-// added to the phase so crests do not line up. Deep-water dispersion sets the
-// speed, so long waves outrun short ones.
-fn mu_gerstner(coord: vec2<f32>, dir: vec2<f32>, t: f32, noise: f32, wavelength: f32) -> f32 {
-    let k = 6.2831853 / max(wavelength, 1e-3);
-    let w = sqrt(9.8 * k);
-    let x = w * t - k * (dot(dir, coord) + noise);
-    let s = sin(x) * 0.5 + 0.5;
-    return s * s;
-}
+// A five-octave wave field with deep-water dispersion. The octaves fade by
+// pixel footprint instead of by distance alone: high-frequency ripples go
+// away before they alias, while the long swells remain all the way to the
+// horizon. That is what keeps a distant lake from turning into a mirror.
+// Returns (height, slope.x, slope.z).
+struct MuWaterField {
+    height: f32,
+    slope: vec2<f32>,
+};
 
-fn mu_water_height(p: vec2<f32>) -> f32 {
-    let t = 0.5 * frame.time * water_speed;
-    var coord = p;
-    // The wind direction itself changes slowly across the lake, so wave trains
-    // are not all parallel to one shore-to-shore axis.
-    let wind_angle = 0.5235988 + (mu_vnoise2(p * 0.0060 + vec2<f32>(3.1, 7.7)) - 0.5) * 1.40;
+fn mu_water_field(p: vec2<f32>, footprint: f32) -> MuWaterField {
+    let t = frame.time * water_speed;
+    let gust_patch = mu_vnoise2(p * 0.0032 + vec2<f32>(2.7, 9.1));
+    let gust = 0.55 + 0.70 * mu_vnoise2(p * 0.0017 + vec2<f32>(11.0, 3.0));
+    let wind_angle = 0.62 + (gust_patch - 0.5) * 1.55;
     var dir = vec2<f32>(cos(wind_angle), sin(wind_angle));
+
+    // One tiling texture read gives every crest a common wander; the rest of
+    // the field is analytic, so it is cheap and filterable at distance.
+    let ntex = textureSampleLevel(water_noise, water_noise_sampler,
+        (p + vec2<f32>(0.0, 0.18 * t)) * 0.0045, 0.0).r * 2.0;
+
     let cr = cos(2.3999632);
     let sr = sin(2.3999632);
-    var noise_coord = (p + vec2<f32>(0.0, 0.25 * t)) * 0.007;
-    var amp = 1.0;
-    var freq = 0.60;
-    var wl = 1.6;
     var height = 0.0;
-    var norm = 0.0;
-    for (var i = 0; i < 3; i = i + 1) {
-        let n = textureSampleLevel(water_noise, water_noise_sampler, noise_coord, 0.0).r * 2.0;
-        height = height + mu_gerstner(coord * freq, dir, t, n, wl) * amp;
-        norm = norm + amp;
-        amp = amp * 0.5;
-        freq = freq * 1.7;
-        wl = wl * 1.5;
-        noise_coord = noise_coord * 2.5;
+    var slope = vec2<f32>(0.0);
+    var wavelength = 42.0;
+    var amp = 0.045;
+    for (var i = 0; i < 5; i = i + 1) {
+        let k = 6.2831853 / wavelength;
+        let w = sqrt(9.8 * k);
+        let noise = ntex * 0.80 + mu_vnoise2(p * 0.020 + vec2<f32>(f32(i) * 3.7)) * 0.55;
+        let x = w * t - k * (dot(dir, p) + noise * 5.0);
+        let s = sin(x) * 0.5 + 0.5;
+        let c = cos(x);
+        let lod = smoothstep(footprint * 2.2, footprint * 7.0, wavelength);
+        height = height + s * s * amp * lod;
+        slope = slope + dir * (s * c * k * amp * lod) * 3.0;
         dir = vec2<f32>(cr * dir.x - sr * dir.y, sr * dir.x + cr * dir.y);
+        wavelength = wavelength * 1.62;
+        amp = amp * 0.66;
     }
-    let hv = textureSampleLevel(water_noise, water_noise_sampler,
-                                (p + vec2<f32>(0.0, 0.1 * t)) * 0.001, 0.0).r;
-    let variation = max(0.4, hv * 2.0 - 0.5);
-    return (height / max(norm, 1e-5)) * variation;
+
+    // A cross-running chop breaks the parallel trains and gives the far
+    // water a second, slower direction to read against.
+    var dir2 = vec2<f32>(0.42, -0.91);
+    var wl2 = 26.0;
+    var amp2 = 0.030;
+    for (var i = 0; i < 3; i = i + 1) {
+        let k = 6.2831853 / wl2;
+        let w = sqrt(9.8 * k);
+        let x = w * t * 1.07 - k * dot(dir2, p + vec2<f32>(3.0, 1.0));
+        let s = sin(x) * 0.5 + 0.5;
+        let c = cos(x);
+        let lod = smoothstep(footprint * 2.2, footprint * 7.0, wl2);
+        height = height + s * s * amp2 * lod * 0.65;
+        slope = slope + dir2 * (s * c * k * amp2 * lod) * 3.0;
+        wl2 = wl2 * 1.70;
+        amp2 = amp2 * 0.60;
+        dir2 = vec2<f32>(0.91, 0.42);
+    }
+
+    // Some patches are choppier than others, so the surface is not uniform
+    // even where the wave trains are parallel.
+    let variation = max(0.45, mu_vnoise2(p * 0.0012 + vec2<f32>(0.0, 0.05 * t)) * 1.8 - 0.3);
+    return MuWaterField(height * variation, slope * variation * gust);
 }
 
 // Water normal in world axes. For the top face it points up, for the underside
@@ -161,23 +186,19 @@ fn mu_water_normal(input: MaterialInput, flat_normal: vec3<f32>) -> vec3<f32> {
     if (abs(flat.y) < 0.5) {
         return flat;
     }
-    // Photon uses the negative tangent-space coordinate for the top face so
-    // the wind direction lines up across the surface.
     let p = -(input.position.xz + frame.camera_position.xz);
-    let e = 0.1;
-    let h0 = mu_water_height(p);
-    let hx = mu_water_height(p + vec2<f32>(e, 0.0));
-    let hz = mu_water_height(p + vec2<f32>(0.0, e));
     let dist = length(input.position);
     let view = normalize(-input.position);
-    let grazing = smoothstep(0.0, 0.15, abs(dot(flat, view)));
-    let sky_damp = mix(0.02, 1.0, mu_sat(input.light.y));
-    // Keep a low-frequency component at distance: a perfectly flat far mirror
-    // is what made the lake read as glass.
-    let far = max(0.35, 1.0 / (1.0 + dist * 0.020));
-    let influence = mix(0.012, 0.040 + 0.150 * frame.rain, sky_damp)
-        * water_waves * grazing * far;
-    var n = normalize(vec3<f32>((hx - h0) / e * influence, 1.0, (hz - h0) / e * influence));
+    let footprint = max(0.05, dist * 0.0018);
+    let field = mu_water_field(p, footprint);
+    // Grazing water needs a *non-zero* ripple: at the horizon the normal is
+    // what gives the mirror its texture, so this fades toward a floor rather
+    // than toward zero.
+    let grazing = mix(0.42, 1.0, smoothstep(0.0, 0.12, abs(dot(flat, view))));
+    let sky_damp = mix(0.55, 1.0, mu_sat(input.light.y));
+    let rain = 1.0 + 0.85 * frame.rain;
+    let influence = 0.50 * water_waves * grazing * sky_damp * rain;
+    var n = normalize(vec3<f32>(field.slope.x * influence, 1.0, field.slope.y * influence));
     if (flat.y < 0.0) { n = -n; }
     return n;
 }
@@ -193,6 +214,48 @@ fn mu_opaque_distance(screen: vec2<i32>, depth: f32) -> f32 {
 fn mu_water_hue(input: MaterialInput) -> vec3<f32> {
     let t = max(input.tint.rgb, vec3<f32>(0.001));
     return t / max(max(t.r, max(t.g, t.b)), 0.001);
+}
+
+// The engine's mirror holds vanilla's sky, not Muon's: it is a real render of
+// the world, but the sky in it is the engine's gradient. This adds Muon's own
+// cloud deck to the analytic sky so a reflected horizon is not just a white
+// sheet. It is deliberately cheap: coverage, not a full march.
+fn mu_water_clouds(dir: vec3<f32>, origin: vec3<f32>) -> vec3<f32> {
+    if (dir.y <= 0.002) { return vec3<f32>(0.0); }
+    let wet = mu_wetness();
+    let coverage = clamp(cloud_coverage + 0.30 * wet, 0.0, 1.0);
+    let thr = mix(0.67, 0.41, coverage);
+    let sun = frame.sun_direction;
+    let day = smoothstep(-0.08, 0.12, sun.y);
+    let light_col = mix(vec3<f32>(0.012, 0.018, 0.030),
+                        mu_sun_color(sun.y) * 1.35, day)
+        + mu_srgb_decode(frame.sky_color) * (0.18 + 0.20 * day);
+    var c = vec3<f32>(0.0);
+
+    let t0 = (MU_CUMULUS_BASE - origin.y) / dir.y;
+    if (t0 > 0.0 && cloud_cumulus > 0.001) {
+        let p = origin + dir * t0;
+        let m = smoothstep(thr, thr + 0.16, mu_cumulus_chart(p.xz, frame.time));
+        c = c + light_col * (m * cloud_cumulus * 0.85);
+    }
+
+    let t1 = (MU_ALTO_BASE - origin.y) / dir.y;
+    if (t1 > 0.0 && cloud_altocumulus > 0.001) {
+        let p = origin + dir * t1;
+        let m = smoothstep(thr + 0.04, thr + 0.18,
+                           mu_altocumulus_chart(p.xz, frame.time));
+        c = c + light_col * (m * cloud_altocumulus * 0.45);
+    }
+
+    let t2 = (MU_CIRRUS_ALT - origin.y) / dir.y;
+    if (t2 > 0.0 && cloud_cirrus > 0.001) {
+        let p = origin + dir * t2;
+        let m = mu_cirrus_density(p.xz, frame.time);
+        c = c + light_col * (m * 0.40);
+    }
+    // A grazing reflection crosses an enormous sample footprint. Fade the
+    // cloud part out there so the horizon does not turn into white speckle.
+    return c * smoothstep(0.008, 0.060, dir.y);
 }
 
 fn mu_water_top(input: MaterialInput, flat: vec3<f32>) -> vec4<f32> {
@@ -234,9 +297,16 @@ fn mu_water_top(input: MaterialInput, flat: vec3<f32>) -> vec4<f32> {
     let scatter = hue * vec3<f32>(0.035, 0.150, 0.200) * (0.2 + 0.8 * day) * (vec3<f32>(1.0) - transmit);
     let through = behind * transmit + scatter;
 
+    // The reflection ray and Muon's own sky (with the cloud deck added).
+    let r = reflect(-view, n);
+    var sky_refl = mu_sky_radiance(r, 5) * sky_intensity;
+    sky_refl = sky_refl * mix(vec3<f32>(0.78, 0.91, 1.16), vec3<f32>(1.0),
+                              smoothstep(0.0, 0.28, r.y));
+    sky_refl = sky_refl + mu_water_clouds(r, frame.camera_position);
+
     // Engine water mirror (half resolution). A small cross filter hides its
     // stair-steps without smearing the whole reflection.
-    var reflected = vec3<f32>(0.0);
+    var reflected = sky_refl;
     if (reflections && frame.has_reflection == 1u) {
         let ruv = clamp(input.screen + wave * 0.45, vec2<f32>(0.002), vec2<f32>(0.998));
         let px = vec2<f32>(1.5) / frame.resolution;
@@ -245,19 +315,40 @@ fn mu_water_top(input: MaterialInput, flat: vec3<f32>) -> vec4<f32> {
         let c2 = textureSampleLevel(reflection, reflection_sampler, ruv - vec2<f32>(px.x, 0.0), 0.0).rgb;
         let c3 = textureSampleLevel(reflection, reflection_sampler, ruv + vec2<f32>(0.0, px.y), 0.0).rgb;
         let c4 = textureSampleLevel(reflection, reflection_sampler, ruv - vec2<f32>(0.0, px.y), 0.0).rgb;
-        reflected = mu_scene_decode((c0 * 2.0 + c1 + c2 + c3 + c4) / 6.0);
-    } else {
-        reflected = mu_sky_radiance(reflect(-view, n), 6);
+        let mirror = mu_scene_decode((c0 * 2.0 + c1 + c2 + c3 + c4) / 6.0);
+
+        // The mirror's sky is vanilla's gradient, so swap those pixels for
+        // Muon's sky. A reflected tree line is darker and more saturated than
+        // the gradient and survives the comparison; a fogged far shore is
+        // close enough to the horizon colour that replacing it is harmless.
+        let vanilla_sky = mu_scene_decode(mix(frame.fog_color, frame.sky_color,
+            smoothstep(0.02, 0.45, r.y)));
+        let delta = length(mirror - vanilla_sky)
+            / max(length(vanilla_sky) + length(mirror), 1.0e-3);
+        let sky_like = 1.0 - smoothstep(0.10, 0.42, delta);
+        let high = smoothstep(0.10, 0.55, r.y);
+        let sky_mask = clamp(max(sky_like, high * 0.90), 0.0, 1.0);
+        reflected = mix(mirror * 0.94 + sky_refl * 0.06, sky_refl, sky_mask);
     }
+
+    // Grazing reflections read as a white sheet when the sky is pale. Keep a
+    // little of the water's own blue in them instead of letting the horizon
+    // colour take over completely.
+    let grazing = 1.0 - smoothstep(0.0, 0.26, abs(dot(view, flat)));
+    reflected = mix(reflected, reflected * vec3<f32>(0.78, 0.94, 1.14), grazing * 0.55);
 
     let glint = mu_specular(n, view, frame.light_direction, 0.085, vec3<f32>(0.02))
         * sun_col * 10.0 * shadow;
     var color = mix(through, reflected, fresnel) + glint;
 
     // A little crest foam, so the waves have a readable shape at a glance.
+    // It is kept near the camera: at distance the filtered field would turn
+    // every crest into a white speck.
     let wp = input.position.xz + frame.camera_position.xz;
-    let crest = mu_water_height(wp);
-    let foam = smoothstep(0.70, 1.45, crest) * 0.075 * water_waves * (0.35 + 0.65 * frame.rain);
+    let crest = mu_water_field(wp, 0.28);
+    let near = 1.0 - smoothstep(24.0, 110.0, dist);
+    let foam = smoothstep(0.255, 0.345, crest.height) * 0.030 * water_waves
+        * (0.35 + 0.65 * frame.rain) * near;
     color = mix(color, vec3<f32>(0.78, 0.88, 0.94), foam);
     return vec4<f32>(mu_scene_encode(max(color, vec3<f32>(0.0))), 1.0);
 }

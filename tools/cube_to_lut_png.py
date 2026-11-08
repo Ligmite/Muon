@@ -4,6 +4,12 @@
 
 Usage:
     python cube_to_lut_png.py input.cube output.png [--blue-fastest]
+    python cube_to_lut_png.py input.cube output.png --pack muon-0.5.0.hshader
+
+With --pack, the atlas is also written into a copy of the `.hshader` (the
+download bundle ships that file next to this tool), replacing its `lut.png`.
+Horizon reads a `.hshader` as a zip, so this avoids unpacking and repacking by
+hand.
 
 The .cube spec's usual data order is red-fastest:
     index = b*N*N + g*N + r
@@ -20,7 +26,10 @@ LUT normally expects. Apply at strength < 1 with the pack's LUT strength option.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+import zipfile
+from pathlib import Path
 
 from PIL import Image
 
@@ -84,6 +93,8 @@ def main() -> int:
     ap.add_argument("cube")
     ap.add_argument("png")
     ap.add_argument("--blue-fastest", action="store_true")
+    ap.add_argument("--pack", metavar="HSHADER",
+                    help="also replace lut.png inside this .hshader")
     args = ap.parse_args()
 
     size, dmin, dmax, data = parse_cube(args.cube)
@@ -102,6 +113,27 @@ def main() -> int:
                 px[b * N + r, g] = tuple(round(max(0.0, min(1.0, c)) * 255) for c in v)
     img.save(args.png, optimize=True)
     print(f"wrote {args.png}: {size}^3 -> {N}^3 atlas ({N*N}x{N})")
+
+    if args.pack:
+        pack = Path(args.pack)
+        if not pack.is_file():
+            raise SystemExit(f"no such pack: {pack}")
+        atlas = Path(args.png).read_bytes()
+        tmp = pack.with_name(pack.name + ".lut-tmp")
+        replaced = False
+        with zipfile.ZipFile(pack) as src, \
+                zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as dst:
+            for item in src.infolist():
+                data = src.read(item.filename)
+                if item.filename == "lut.png":
+                    data = atlas
+                    replaced = True
+                dst.writestr(item, data)
+        if not replaced:
+            os.remove(tmp)
+            raise SystemExit(f"{pack} has no lut.png")
+        os.replace(tmp, pack)
+        print(f"packed {args.png} into {pack}")
     return 0
 
 

@@ -1,10 +1,12 @@
 // Depth-aware volumetric clouds.
 //
-// The sky stage cannot draw a cloud deck that lies below the camera: the sky
-// dome only covers rays above the horizon. This pass rays from the world camera
-// through every pixel, stops at the scene depth, and composites the clouds in
-// front of whatever is there. That keeps clouds visible from above and lets
-// them occlude terrain correctly.
+// Three world-space layers are marched here: cumulus/stratocumulus at about
+// 1000 blocks, altocumulus/altostratus at about 2800 and a planar cirrus sheet
+// at about 5600. The sky stage cannot draw a deck that lies below the camera:
+// the sky dome only covers rays above the horizon. This pass rays from the
+// world camera through every pixel, stops at the scene depth, and composites
+// the layers in front of whatever is there. That keeps clouds visible from
+// above and lets them occlude terrain correctly.
 fn post(input: PostInput) -> vec4<f32> {
     if (!clouds_enabled) { return input.color; }
 

@@ -1,4 +1,4 @@
-# Muon 0.4.5
+# Muon 0.5.0
 
 **Muon** is an independent WGSL shader for Horizon's shader API 0.1 (sky +
 material + weather + post), made in the spirit of SixthSurge's Photon. Muon's
@@ -6,100 +6,86 @@ grade keeps the shape of Photon's `c19_color_grading` (Lottes default, 18% grey
 log-contrast, hue-band saturation, split tone, vignette) and its HDR path keeps
 the filmic toe with a soft shoulder at the display peak.
 
+## What changed in 0.5.0
+
+* **Three cloud layers.** Cumulus/stratocumulus at about 1000 blocks,
+  altocumulus/altostratus at about 2800 and a planar cirrus/cirrostratus sheet at
+  about 5600. Each layer has its own coverage chart, shape field and lighting;
+  rain grows the cumulus into a storm deck and suppresses the cirrus. The layers
+  are high and world-anchored, so walking no longer slides the whole deck across
+  the sky.
+* **Water reaches the horizon.** The wave field is now five octaves plus a
+  crossing swell train, filtered by pixel footprint instead of distance. Long
+  swells survive to the far shore; short ripples fade before they alias. The
+  normal fades to a floor at grazing angles, so the lake is never a perfect
+  mirror.
+* **The horizon reflection is Muon's sky.** Horizon's water mirror contains
+  vanilla's sky gradient. Water now replaces those mirror pixels with Muon's
+  atmosphere and cloud colours while keeping darker terrain reflections, so the
+  far water no longer reflects a grey-white sheet.
+* **Distance fog with a LOD floor.** Exponential height fog with the sky's own
+  horizon colour as in-scatter, capped so the far LOD is hazed rather than
+  erased. The old horizon band (vanilla fog colour mixed over the whole lower
+  dome) is gone; the horizon haze is now the atmosphere's own multiple-
+  scattering term.
+* **Cloud layer options.** `Cumulus amount`, `Altocumulus amount` and
+  `Cirrus amount` join coverage and density, so each layer can be removed
+  independently.
+
 ## What changed in 0.4.5
 
-* **Clouds have a 3D coverage field.** The 2D chart is now perturbed at the
-  sample by 3D noise with a height-dependent threshold, and an egg-shaped
-  altitude profile thins bases and tops. Bases vary up to ±140 blocks and
-  thickness 50–150%.
-* **Water breaks its directional lock.** Wind direction now varies slowly across
-  the surface; the base wavelength is larger and the octaves still rotate by the
+* **Clouds have a 3D coverage field.** The 2D chart is perturbed at the sample
+  by 3D noise with a height-dependent threshold, and an egg-shaped altitude
+  profile thins bases and tops.
+* **Water breaks its directional lock.** Wind direction varies across the
+  surface; the base wavelength is larger and the octaves still rotate by the
   golden angle.
-* **Warmer, more vibrant grade.** Higher brightness/saturation/contrast, a
-  stronger amber-highlight / cool-shadow split and a small global warm bias.
+* **Warmer, more vibrant grade.**
 
 ## What changed in 0.4.4
 
 * **Photon-style wave field.** Three squared-sine octaves with deep-water
-  dispersion, golden-angle rotation and a tiling noise texture in the phase
-  replace the procedural value noise. The normal is deliberately small; the
-  mirror/refraction distortion and broader glint make it visible.
-* **Clouds in a depth-aware post pass.** The deck is raymarched from the world
-  camera and stopped at scene depth, so it is visible from above and can occlude
-  terrain. Covers are smaller and more separated, with ±95-block base variation
-  and 55–145% thickness variation.
+  dispersion, golden-angle rotation and a tiling noise texture in the phase.
+* **Clouds in a depth-aware post pass**, so they are visible from above and
+  occlude terrain correctly.
 * **Photon-style options pages:** General, World, Lighting, Sky, Fog, Materials,
   Water, Post-Processing, Misc and HDR.
 
 ## What changed in 0.4.3
 
-* **Waves you can see.** The normal is about twice as strong, the mirror and
-  refraction are distorted much more, the sun glint is broader and crest foam
-  adds a readable edge. Footprint fading still removes distant aliasing.
-* **Clouds break vertically.** Per-column base offset is now up to ±95 blocks
-  and thickness varies 55–145%, with a coarser billow/erosion pair so the
-  surface is less noisy.
-* **Lens flare only when the sun is near centre.** A centred/edge fade plus
-  lower intensity and smaller ghosts stop the wide glare when the sun is just
-  clipping the screen.
+* **Waves you can see.** Stronger normals, stronger mirror/refraction
+  distortion, a broader sun glint and subtle crest foam.
+* **Clouds break vertically.** Per-column base offset and thickness variation,
+  with a coarser billow/erosion pair.
+* **Lens flare only when the sun is near centre.**
 
 ## What changed in 0.4.2
 
-* **LUT sampling fixed and off by default.** The atlas was sampled on slice
-  edges, so the red channel fell into the next blue slice; a white sun became
-  teal and water/portal colours shifted pink. Sampling now uses texel centres.
-  `Use LUT` defaults off until you install a real LUT.
-* **Lens flare.** A toggleable screen-space flare with a sun halo, anamorphic
-  streak and four lens ghosts, anchored to the sun's projected position.
-  `Lens flare` + `Lens flare intensity`.
+* **LUT sampling fixed and off by default.** Sampling uses texel centres, so a
+  white sun stays white and blue water stays blue.
+* **Lens flare** with a sun halo, anamorphic streak and four ghosts.
 * **A larger sun disc** (about 2.5° across) and a wider sun-space halo.
-* **Clouds vary in height.** Per-column base/height noise means the deck is no
-  longer one perfectly level slab.
-* **Water is noise-led now.** Two broad swells plus three scales of isotropic
-  noise chop; the directional cross-grid is gone and the normal fades by pixel
-  footprint at distance.
-* **Less green push, steadier exposure.** Green saturation defaults slightly
-  negative; auto exposure reads the eased camera light instead of a screen
-  average, so it no longer pumps while walking.
+* **Clouds vary in height** instead of one level slab.
+* **Water is noise-led.** Two broad swells plus three scales of chop; the
+  directional cross-grid is gone.
+* **Less green push, steadier exposure.**
 
 ## What changed in 0.4.1
 
-* **Highlights-only bloom.** Bloom now has an HDR threshold (default 1.0), so
-  only the sun disc and genuinely emissive surfaces bloom. A bright cloud
-  drifting past no longer carries its own glow, which is what made the glare
-  look detached from the sun while walking; a sun-space halo in the sky shader
-  anchors the rest.
+* **Highlights-only bloom.** Bloom is thresholded to HDR highlights, so a bright
+  cloud no longer carries its own moving glow; a sun-space halo anchors the
+  glare to the sun.
 
 ## What changed in 0.4.0
 
-* **Photographic LUT support.** The pack ships a 33³ identity LUT as a
-  display-referred 2D atlas (`lut.png`). Drop in a Lightroom/Resolve `.cube`
-  converted with `tools/cube_to_lut_png.py`, repack, and the grade is
-  `Use LUT` + `LUT strength`. The LUT runs after tonemapping, where a
-  photographic LUT expects to be.
-* **Smaller, separated clouds.** A higher-frequency coverage chart and a
-  three-scale fBm now break the deck into individual cumulus with gaps instead
-  of one connected mass; the billow erosion is finer and the top/bottom light
-  march stronger.
-* **Distant water stops aliasing.** The wave normal is faded by the world size
-  of a pixel (`fwidth` of world XZ), so the high-frequency ripples disappear
-  into a smooth sky reflection before they can form a crosshatch. Near water
-  gets a stronger wave normal.
-* **Readable shadows.** Ambient is lifted with a sqrt sky-light response, a
-  sky/ground floor and a warm ground bounce, so trunks and shaded sides keep
-  detail at distance instead of printing black.
-* **No vanilla clouds, sun or stars.** The manifest sets
-  `[sky] clouds = false`, `sun = false`, `stars = false`, and the sky stage
-  draws the atmosphere, sun and stars. The clouds are a depth-aware post pass
-  ray-marched from the world camera position, so they stay world-locked and are
-  visible from above as well as below.
-* **A real shadow map.** `[shadow]` (2048², 128 blocks, cutout leaves/plants
-  solid) gives cast shadows from the sun by day and the moon by night, with
-  3×3 PCF and translucent-colour tinting.
-* **Foliage and lighting.** LabPBR normals/specular, wrapped diffuse, a
-  foliage up-normal bias, leaf translucency, coloured block light and emission
-  replace the flat "sky light gates the sun" model.
-* **Weather.** Rain and snow are lit and hidden while the camera is underwater.
+* **Photographic LUT support.** A 33³ identity LUT as a display-referred atlas,
+  plus a `.cube` converter.
+* **Smaller, separated clouds** with a coverage chart and billow erosion.
+* **Distant water stops aliasing.**
+* **Readable shadows** and an ambient floor.
+* **No vanilla clouds, sun or stars.** The pack draws them.
+* **A real shadow map.**
+* **LabPBR terrain response** and lit weather.
 
 ## What maps 1:1 and what is approximated
 
@@ -107,13 +93,14 @@ the filmic toe with a soft shoulder at the display peak.
 |---|---|
 | Tonemap, grading, vignette, bloom mix | Similar grade, written for Muon (bloom is a 3-ring blur, not the mip chain) |
 | HDR (filmic toe, soft shoulder) | Muon's own shoulder, `HDR output` option |
-| Atmosphere / sky | Single-scattering analytic model (no sky LUT) |
+| Atmosphere / sky | Single-scattering analytic model plus a multiple-scattering horizon term (no sky LUT) |
 | Sun/moon shadows | Real 2048² shadow map, 3×3 PCF |
 | GTAO | Depth-only GTAO, 4 slices × 5 steps, bilateral denoise |
 | SSR | Depth march, water (and optional wet ground) |
-| Volumetric light | Screen-space sun shafts + haze (no shadow-map raymarch) |
-| Water | Three-octave noise-textured wave field, engine mirror, refraction, absorption, Snell's window from below |
-| Clouds | Depth-aware volumetric cumulus in post, cloud-shadow chart on terrain |
+| Volumetric light | Screen-space sun shafts |
+| Distance fog | Analytic height integral with a capped optical depth, no shadow-map raymarch |
+| Water | Five-octave wave field, engine mirror with Muon sky replacement, refraction, absorption, Snell's window from below |
+| Clouds | Three depth-aware layers (cumulus, altocumulus, cirrus), cloud-shadow chart on terrain |
 | LUT | 33³ display-referred atlas, `.cube` converter included |
 | Aurora, SSS, LPV coloured light, DOF, motion blur, TAA, rain puddles | Not in this pack |
 
@@ -137,7 +124,7 @@ identity atlas, so nothing changes until you replace it.
 2. Repack the folder:
 
    ```sh
-   python tools/pack_muon.py pack muon-0.4.2.hshader
+   python tools/pack_muon.py pack muon-0.5.0.hshader
    ```
 
 3. In game, enable `Use LUT` and set `LUT strength` to taste. The LUT is
@@ -149,12 +136,14 @@ identity atlas, so nothing changes until you replace it.
 
 1. If water looks too dark or too clear, use `Water absorption` (0 = clear,
    3 = murky).
-2. If the sun is too strong, lower `Sunlight intensity`; the reference default
-   is 7.
+2. If the sun is too strong, lower `Sunlight intensity`; the default is 7.
 3. `Sun/moon shadows` off measures the lighting without the shadow pass.
-4. `Horizon haze` controls the fog band at the horizon; 0 leaves the atmosphere
-   untouched.
-5. `Output linear` is a debugging switch; leave it off.
+4. `Distance fog` controls the height fog; 0 removes it.
+5. `Cumulus amount`, `Altocumulus amount` and `Cirrus amount` remove layers if
+   the GPU cost is too high.
+6. `Horizon haze` only affects the last few degrees of the dome; 0 leaves the
+   atmosphere untouched.
+7. `Output linear` is a debugging switch; leave it off.
 
 Muon is MIT licensed; see `LICENSE`.
 
@@ -178,4 +167,3 @@ WGSL in this pack is Muon's own implementation.
   <https://github.com/horizon-rust/horizon>
 
 Keep this file and `LICENSE` with any redistribution.
-

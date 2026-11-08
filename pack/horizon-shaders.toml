@@ -1,9 +1,9 @@
 schema = 1
 id = "muon"
 name = "Muon"
-version = "0.4.5"
+version = "0.5.0"
 api = "0.1"
-description = "Muon: an independent Photon-inspired Horizon shader with a real sun/moon shadow map, cloud shadows, an irregular deep-water wave spectrum, the engine water mirror, volumetric cumulus in the sky stage, GTAO, SSR, screen-space volumetric light, bloom, a filmic colour grade, a display-referred LUT and HDR output. Credits in README.md."
+description = "Muon: an independent Photon-inspired Horizon shader with layered cumulus, altocumulus and cirrus, a real sun/moon shadow map, cloud shadows, a footprint-filtered deep-water wave spectrum, the engine water mirror, depth-aware distance fog that leaves the LOD readable, GTAO, SSR, screen-space volumetric light, bloom, a filmic colour grade, a display-referred LUT and HDR output. Credits in README.md."
 shared = ["common.wgsl"]
 
 # The pack draws the whole Overworld sky itself. Turning the engine's own sun,
@@ -401,9 +401,9 @@ step = 0.05
 
 [[options]]
 id = "fog_density"
-name = "Extra atmospheric haze"
+name = "Distance fog"
 type = "float"
-default = 0.25
+default = 0.50
 min = 0.0
 max = 2.0
 step = 0.05
@@ -421,7 +421,7 @@ step = 0.05
 id = "sky_fog_blend"
 name = "Horizon haze"
 type = "float"
-default = 0.35
+default = 0.03
 min = 0.0
 max = 1.0
 step = 0.05
@@ -455,7 +455,7 @@ default = true
 id = "cloud_coverage"
 name = "Cloud coverage"
 type = "float"
-default = 0.32
+default = 0.42
 min = 0.0
 max = 1.0
 step = 0.05
@@ -467,6 +467,33 @@ type = "float"
 default = 1.0
 min = 0.3
 max = 2.0
+step = 0.05
+
+[[options]]
+id = "cloud_cumulus"
+name = "Cumulus amount"
+type = "float"
+default = 1.0
+min = 0.0
+max = 1.0
+step = 0.05
+
+[[options]]
+id = "cloud_altocumulus"
+name = "Altocumulus amount"
+type = "float"
+default = 0.15
+min = 0.0
+max = 1.0
+step = 0.05
+
+[[options]]
+id = "cloud_cirrus"
+name = "Cirrus amount"
+type = "float"
+default = 0.18
+min = 0.0
+max = 1.0
 step = 0.05
 
 # ---- Output / HDR ----
@@ -608,8 +635,8 @@ items = ["ao_strength", "ao_radius"]
 [[pages]]
 id = "sky"
 name = "Sky"
-description = "Atmosphere, clouds and the horizon haze."
-items = ["sky_intensity", "sky_saturation", "sky_fog_blend", "clouds_enabled", "cloud_coverage", "cloud_density"]
+description = "Atmosphere, cloud layers and the horizon haze."
+items = ["sky_intensity", "sky_saturation", "sky_fog_blend", "clouds_enabled", "cloud_coverage", "cloud_density", "cloud_cumulus", "cloud_altocumulus", "cloud_cirrus"]
 
 [[pages]]
 id = "fog"
@@ -648,4 +675,4 @@ description = "HDR output and display levels."
 items = ["hdr_enabled", "hdr_peak_nits", "hdr_paper_white"]
 
 [budget]
-gpu_ms = 10.0
+gpu_ms = 14.0

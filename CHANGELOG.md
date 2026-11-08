@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.5.0
+
+- Clouds: three world-space layers (cumulus/stratocumulus at about 1000 blocks,
+  altocumulus/altostratus at about 2800, cirrus/cirrostratus at about 5600), each
+  with its own coverage chart, shape field, lighting and aerial perspective.
+  The higher, layered deck removes most of the walking parallax that made the
+  old 380-block slab read as a ceiling sliding past. New `Cumulus amount`,
+  `Altocumulus amount` and `Cirrus amount` options.
+- Water: five-octave wave field plus a crossing swell train, filtered by pixel
+  footprint rather than distance, so long swells survive to the horizon while
+  short ripples cannot alias. The normal fades to a floor at grazing angles
+  instead of to zero.
+- Water reflection: the engine mirror's vanilla sky pixels are replaced with
+  Muon's atmosphere and cloud colour, so the horizon does not reflect a
+  grey-white sheet.
+- Fog: exponential height fog using the sky's horizon colour as in-scatter,
+  with a capped optical depth so the far LOD stays visible.
+- Sky: a multiple-scattering horizon term; the old full-dome vanilla-fog blend
+  is reduced to a small last-few-degrees haze so the horizon is blue, not white.
+- Repository: every release is kept under `versions/`; `muon-download` is now
+  only the built shader, the licence and the LUT converter.
+
 ## 0.4.5
 
 - Clouds: 3D coverage perturbation, height-dependent threshold, egg-shaped

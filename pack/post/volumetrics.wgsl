@@ -51,18 +51,13 @@ fn post(input: PostInput) -> vec4<f32> {
     if (frame.eye_in != 0u) { return vec4<f32>(src.rgb, 1.0); }
 
     // ------------------------------------------------------------------
-    // Aerosol haze: sunlit Mie in-scatter, distance based, geometry only.
+    // Distance fog: exponential height fog with the sky's own horizon
+    // colour as its in-scatter. The optical depth is capped (in
+    // `mu_aerial_fog`) so the far LOD is hazed, not erased.
     // ------------------------------------------------------------------
     let mu = dot(V, sun);
     if (!is_sky && fog_density > 0.0) {
-        let height = frame.camera_position.y + V.y * dist;
-        let height_fall = exp(-max(height - 62.0, 0.0) * 0.015);
-        let density = 0.0011 * fog_density * (1.0 + 4.0 * frame.rain) * height_fall;
-        let trans = exp(-density * dist);
-        let sky_amb = mu_srgb_decode(frame.sky_color) * vec3<f32>(0.55, 0.60, 0.65) * 0.9
-            + vec3<f32>(0.004, 0.006, 0.012);
-        let haze_light = sky_amb + mu_sun_color(sun.y) * (0.9 * mu_mie_phase(mu) * 3.0 * day * weather);
-        lin = lin * trans + haze_light * (1.0 - trans) * 0.8;
+        lin = mu_aerial_fog(frame.camera_position, V, dist, lin);
     }
 
     // ------------------------------------------------------------------
