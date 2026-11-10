@@ -129,4 +129,4 @@ actually happen in shader development; it cannot catch type errors.
 
 ## Licence
 
-MIT. See [`LICENSE`](LICENSE).
+Muon License Agreement. See [`LICENSE`](LICENSE).
