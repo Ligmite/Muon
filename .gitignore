@@ -1,0 +1,13 @@
+# Build outputs are attached to GitHub releases, not committed.
+release/
+
+# Local tooling junk
+.dump/
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store

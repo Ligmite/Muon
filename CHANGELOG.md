@@ -1,91 +1,112 @@
 # Changelog
 
-## 0.5.0
+All notable changes to Muon are documented here.
+The format follows [Keep a Changelog](https://keepachangelog.com/), and the
+project uses the iteration scheme described in `docs/ITERATIONS.md`.
 
-- Clouds: three world-space layers (cumulus/stratocumulus at about 1000 blocks,
-  altocumulus/altostratus at about 2800, cirrus/cirrostratus at about 5600), each
-  with its own coverage chart, shape field, lighting and aerial perspective.
-  The higher, layered deck removes most of the walking parallax that made the
-  old 380-block slab read as a ceiling sliding past. New `Cumulus amount`,
-  `Altocumulus amount` and `Cirrus amount` options.
-- Water: five-octave wave field plus a crossing swell train, filtered by pixel
-  footprint rather than distance, so long swells survive to the horizon while
-  short ripples cannot alias. The normal fades to a floor at grazing angles
-  instead of to zero.
-- Water reflection: the engine mirror's vanilla sky pixels are replaced with
-  Muon's atmosphere and cloud colour, so the horizon does not reflect a
-  grey-white sheet.
-- Fog: exponential height fog using the sky's horizon colour as in-scatter,
-  with a capped optical depth so the far LOD stays visible.
-- Sky: a multiple-scattering horizon term; the old full-dome vanilla-fog blend
-  is reduced to a small last-few-degrees haze so the horizon is blue, not white.
-- Repository: every release is kept under `versions/`; `muon-download` is now
-  only the built shader, the licence and the LUT converter.
+## [1.0.0] - "Ion"
 
-## 0.4.5
+First complete release.
 
-- Clouds: 3D coverage perturbation, height-dependent threshold, egg-shaped
-  altitude profile; base variation up to ±140 blocks, thickness 50–150%.
-- Water: wind direction varies across the lake, larger base wavelength; the
-  golden-angle octave stack and noise phase remain.
-- Grade: warmer, brighter and more saturated; stronger split tone.
+### Added
 
-## 0.4.4
+**Pipeline**
+- Deferred renderer with 17 passes: shadow, gbuffers, 5 deferred passes,
+  7 composite passes, final.
+- Explicit `RENDERTARGETS` / `layout(location)` outputs on every pass, so the
+  pack is portable to non-GL backends.
+- Half-resolution AO, volumetric and cloud buffers with depth-aware upsampling.
+- Persistent history buffers for TAA and the path tracer.
 
-- Photon-style wave field: three squared-sine octaves, deep-water dispersion,
-  golden-angle rotation and a tiling noise texture in the phase; small normal,
-  stronger reflection/refraction distortion and a broader glint.
-- Clouds moved to a depth-aware post pass, so they are visible from above and
-  occlude terrain correctly. Coverage is smaller, bases vary ±95 blocks and
-  thickness 55–145%, with more contrast between lit tops and shaded bases.
-- Photon-style Shader Options pages: General, World, Lighting, Sky, Fog,
-  Materials, Water, Post-Processing, Misc, HDR.
+**Lighting**
+- Physically based shading: GGX specular with height-correlated Smith
+  visibility, multi-scatter energy compensation, split-sum environment BRDF.
+- labPBR resource pack support (smoothness, F0 with conductor heuristic,
+  emission, porosity/SSS), plus a legacy specular mode and a no-pack mode with
+  hand-tuned vanilla materials.
+- Normal mapping, and parallax occlusion mapping with self-shadowing and
+  distance fade.
+- PCSS soft shadows with blocker search, rotated Poisson PCF, normal-offset
+  bias and a distortion that concentrates shadow resolution near the player.
+- Screen-space contact shadows.
+- Cloud shadows on terrain.
+- GTAO (horizon based) and SSAO, with an ambient-only occlusion option.
+- Subsurface scattering for foliage, flowers, cloth and snow; cloth sheen.
+- Rain puddles and general wet-surface darkening driven by `wetness`.
+- Handheld light.
 
-## 0.4.3
+**Sky and atmosphere**
+- Rayleigh + Mie + ozone single-scattering atmosphere with multiple-scattering
+  approximation.
+- Sun disc with limb darkening; moon disc with eight phases and procedural
+  craters.
+- Stars with twinkle, Milky Way, aurora curtains, rainbows.
+- Weather blending (overcast, desaturation, rain dimming).
+- Separate Nether and End skies.
 
-- Stronger water normals, much stronger mirror/refraction distortion, a broader
-  sun glint and subtle crest foam so waves read at a glance.
-- Cloud columns vary in base (±95 blocks) and thickness (55–145%), with coarser
-  billow/erosion to remove the noisy surface.
-- Lens flare is faded by sun centring and screen edge, and is weaker by default.
+**Clouds**
+- Four independent volumetric layers: cumulus, cumulus congestus,
+  altocumulus, cirrus.
+- Beer-Lambert + powder + three-octave multiple scattering lighting with
+  configurable light steps.
+- Shared coverage field driven by weather; wind direction and speed.
+- Optional classic flat cloud layer.
 
-## 0.4.2
+**Volumetrics**
+- Half-resolution raymarched fog with exponential height falloff, rain
+  multiplier, cave fog and a border term.
+- Shadow-map light shafts with dithered visibility and HG phase.
+- Underwater medium switch.
 
-- Fixed the LUT atlas sampling: red is now sampled at texel centres instead of
-  slice edges, so white no longer turns teal and blue water no longer turns
-  pink. `Use LUT` defaults off until a real LUT is installed.
-- Added a toggleable lens flare (sun halo, anamorphic streak, four ghosts).
-- Enlarged the sun disc to about 2.5° and widened its halo.
-- Cloud columns now vary in base/thickness; the deck is no longer a level slab.
-- Water is noise-led (two swells + three chop scales); the directional
-  cross-grid is gone, and normals fade by pixel footprint at distance.
-- Reduced green saturation; auto exposure now uses the eased camera light, not a
-  screen average, so it does not pump while walking.
+**Water**
+- Analytic wave normals and matching vertex displacement.
+- Rain ripples, refraction, Beer-Lambert absorption, scattering, caustics,
+  edge foam, SSR and sun specular.
+- Underwater absorption for the camera.
 
-## 0.4.1
+**Ray tracing**
+- Screen-space path tracer with three modes (reflections, reflections + GI,
+  full path tracing).
+- Next-event estimation to the sun with soft shadow cone, cosine/GGX lobe
+  selection, Russian roulette.
+- Temporal accumulation with motion vectors and disocclusion rejection.
+- Edge-stopping bilateral denoiser.
 
-- Bloom is thresholded to HDR highlights, so a bright cloud no longer carries
-  its own moving glow; added a sun-space halo.
+**Post processing**
+- TAA with Catmull-Rom history and neighbourhood clipping.
+- FXAA and contrast-adaptive sharpening.
+- 13-tap bloom with soft knee.
+- Depth of field with foreground rejection; motion blur.
+- Auto exposure from a fixed luminance grid, or manual.
+- Five tonemappers, with Muon Filmic as the default.
+- Warm vibrant grade: white balance, contrast, vibrance, hue-selective
+  orange/teal/green boosts, split toning, clarity, black level, Purkinje shift.
+- Vignette, chromatic aberration, film grain.
 
-## 0.4.0
+**Output**
+- Fully linear Rec.709 working space with a single display transform.
+- Native HDR output through rrtt217's HDR mod.
 
-- Added display-referred LUT support (identity atlas, `.cube` converter).
-- Smaller, separated cumulus; stronger cloud shadowing.
-- Pixel-footprint fade for distant water.
-- Ambient floor for shaded trunks.
+**Compatibility**
+- Distant Horizons: `dh_terrain`, `dh_water`, `dh_generic`, combined depth,
+  LoD position reconstruction everywhere it matters.
+- Voxy: `voxy_opaque.glsl`, `voxy_translucent.glsl`, `voxy.json`
+  (experimental).
+- Designed for Vitrail's Vulkan backend (no compute, no image load/store,
+  explicit render targets).
 
-## 0.3.0
+**Tooling**
+- `tools/validate.py`: preprocessor, include resolution, undefined-function and
+  argument-count checks, delimiter balance, entry-point checks, settings and
+  translation consistency.
+- `tools/gen_programs.py`, `tools/gen_lang.py`, `tools/generate_noise.py`.
+- `tools/build.py`: release zip plus per-iteration archive with a manifest.
+- GitHub Actions workflow that validates and builds on tag.
 
-- Cloud coverage chart with real gaps, 3D billow erosion and a light march.
-- Brighter clear-day sky with dithering.
-- Warmer, higher-contrast grade.
-- Cloud-shadow chart on terrain.
+### Known issues
+- In-game visual validation is still pending for this build.
+- OptiFine is unsupported (history buffers and per-program blending need Iris).
+- No coloured voxel lighting yet.
+- DH/Voxy LoD geometry does not cast shadows.
 
-## 0.2.0
-
-- First public Muon build: real shadow map, water/cloud rework, rewritten grade
-  and Muon namespace.
-
-## 0.1.0
-
-- Initial port of the look to Horizon's WGSL API.
+[1.0.0]: https://github.com/example/muon/releases/tag/v1.0.0

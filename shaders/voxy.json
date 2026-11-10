@@ -1,0 +1,65 @@
+{
+    "unusedString":
+        "
+            // voxy.json is preprocessed by Iris, so settings can be included
+            // here for conditional configuration. The GLSL entry points live
+            // in voxy_opaque.glsl / voxy_translucent.glsl.
+            #include \"/settings.glsl\"
+        ",
+    "version": 1,
+    "excludeLodsFromVanillaDepth": true,
+    "opaqueDrawBuffers": [1, 2, 3, 14],
+    "translucentDrawBuffers": [9, 10],
+    "blending": {
+        -1: "off",
+        0: "ONE ONE_MINUS_SRC_ALPHA ONE ONE_MINUS_SRC_ALPHA"
+    },
+    "useViewportDims": true,
+    "uniforms": [
+        "gbufferModelView",
+        "gbufferModelViewInverse",
+        "gbufferProjection",
+        "gbufferProjectionInverse",
+        "gbufferPreviousModelView",
+        "gbufferPreviousProjection",
+        "shadowModelView",
+        "shadowModelViewInverse",
+        "shadowProjection",
+        "shadowProjectionInverse",
+        "cameraPosition",
+        "previousCameraPosition",
+        "near",
+        "far",
+        "frameTimeCounter",
+        "frameCounter",
+        "sunAngle",
+        "rainStrength",
+        "wetness",
+        "world",
+        "moonPhase",
+        "isEyeInWater",
+        "blindness",
+        "nightVision",
+        "darknessFactor",
+        "eyeAltitude",
+        "sunPosition",
+        "moonPosition",
+        "shadowLightPosition",
+        "upPosition",
+        "viewWidth",
+        "viewHeight",
+        "aspectRatio",
+        "eyeBrightnessSmooth",
+        "heldBlockLightValue",
+        "heldBlockLightValue2"
+    ],
+    "samplers": [
+        "noisetex",
+        "colortex1",
+        "colortex2",
+        "colortex3",
+        "colortex14",
+        "depthtex0",
+        "depthtex1"
+    ]
+}
