@@ -1,0 +1,24 @@
+# Normalise line endings: shader sources must stay LF so that Iris' preprocessor
+# and the validator see identical bytes on every platform.
+* text=auto eol=lf
+
+*.glsl   text eol=lf
+*.vsh    text eol=lf
+*.fsh    text eol=lf
+*.csh    text eol=lf
+*.properties text eol=lf
+*.lang   text eol=lf
+*.json   text eol=lf
+*.md     text eol=lf
+*.py     text eol=lf
+*.ps1    text eol=crlf
+*.sh     text eol=lf
+
+# Generated binary assets: never diffed, never merged.
+*.png binary
+*.dat binary
+.zip  binary
+
+# Exclude reference material from language statistics.
+_ref/ linguist-vendored
+dist/ linguist-generated

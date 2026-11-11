@@ -1,180 +1,117 @@
-# Compatibility
+# Compatibility notes
 
-Muon targets Iris first. This page records exactly what is supported, what is
-best-effort, and what is still unverified, so nobody has to guess.
+Muon is written against the Iris shader pack API and is designed to survive
+translation to other backends. This document records exactly what that means, and
+where the boundaries are.
 
----
+## Target matrix
 
-## Iris
+| Platform | Version | Status |
+|---|---|---|
+| Iris (OpenGL) | 1.11.7+mc26.3 | primary target, developed against |
+| Minecraft | 26.3 | target |
+| Sodium | 0.9.2+mc26.3 | supported |
+| Distant Horizons | 3.3.4-26.3 | integrated (`dh_terrain`, `dh_water`) |
+| Voxy | 0.2.x | integrated (`voxy.json`, `voxy_*.glsl`) |
+| Vitrail (Vulkan) | 0.12.0-beta+mc26.3 | compatibility target |
+| OptiFine | — | not targeted; Muon uses Iris-specific behaviour |
 
-* **Required version: 1.7+.** Muon uses `gbufferPreviousModelView`,
-  `gbufferPreviousProjection`, per-program blending, `layout(location)` outputs
-  with `RENDERTARGETS`, and non-square buffer sizes.
-* **OptiFine:** the pack loads, but the following will not behave correctly:
-  history buffers (TAA, RT), per-program blending, and the `RENDERTARGETS`
-  convention. Treat OptiFine as unsupported.
+## What Muon uses from the API
 
-### Features Muon relies on
+Only documented, widely supported features:
 
-| Feature | Why |
-| --- | --- |
-| `RENDERTARGETS` + explicit locations | unambiguous for Iris, OptiFine and Vulkan backends |
-| `size.buffer.colortexN` | half-resolution AO, fog and clouds |
-| `blend.<program>` | premultiplied translucent layer |
-| `const bool colortexNClear` in a comment block | keeps TAA and RT history alive |
-| `alphaTestRef` | correct cutout behaviour across versions |
-| `gbufferPrevious*` matrices | motion vectors for TAA, RT and motion blur |
+- `layout(location = N) out` plus `/* RENDERTARGETS: ... */`
+- `#include "/path"` with absolute paths from `shaders/`
+- `size.buffer.colortexN`, `colortexNFormat`, `colortexNMipmapEnabled`
+- `flip.<program>.<buffer>`
+- `blend.<program>`
+- `program.<name>.enabled`
+- `texture.noise` and `texture.<program>.<sampler>` with `TEXTURE_3D`
+- `screen`, `profile`, `sliders`
 
----
+Deliberately **not** used:
+
+| Feature | Why not |
+|---|---|
+| custom images / SSBOs (`image.`) | Vitrail support is not guaranteed; the pack must run everywhere |
+| compute shaders (`*.csh`) | not universally available through the translation path |
+| `#extension` / vendor extensions | breaks portability outright |
+| `MC_GL_RENDERER_*` workarounds | Muon avoids whatever would need them |
+| custom uniforms (`uniform.*` in `shaders.properties`) | derivable values are computed in `MuonFrame` instead, which also keeps the frame block authoritative |
+
+Avoiding custom uniforms is a deliberate portability decision: if a backend
+ignores that block of `shaders.properties`, a pack that depends on it renders
+black. Muon's derived values (sun direction, light direction, viewport) are
+computed from the canonical Iris uniforms inside `muon_frame_build()`, so the
+pack degrades to "works" rather than "wrong".
 
 ## Distant Horizons
 
-DH support is implemented through the standard Iris DH contract.
+Muon ships `dh_terrain` and `dh_water`, so DH LOD chunks go through the same
+geometry stages as vanilla terrain:
 
-Programs provided:
+- LOD colour and tint become albedo;
+- LOD lightmaps drive the block/sky light terms;
+- a per-material default table supplies smoothness and F0, because LOD geometry
+  has no LabPBR textures;
+- optional noise break-up (`DH_NOISE`) prevents the LOD ring from reading as a
+  different renderer;
+- the shadow cascade and the volumetric fog treat LOD and vanilla geometry
+  identically, so there is no visible seam at the render-distance boundary.
 
-* `dh_terrain` — LoD terrain
-* `dh_water` — LoD water (shaded as an opaque surface; see below)
-* `dh_generic` — any other DH geometry
-
-What the pack does with DH:
-
-* Grid-snaps LoD vertices relative to `fract(cameraPosition)` so terrain does not
-  swim as the camera moves (`program/dh_terrain_vsh.glsl`).
-* Reconstructs LoD positions with `dhProjectionInverse` / `dhProjection` in
-  `lib/encoding.glsl`, `lib/ao.glsl`, `lib/ssr.glsl`, `lib/pathtracing.glsl` and
-  the volumetric passes.
-* Uses the nearest of the vanilla depth and `dhDepthTex0` as the scene depth
-  (`combined_depth()`, `ao_scene_depth()`, `ssr_scene_depth()`).
-* Shades LoD terrain into the same G-buffer, so it receives the same sun, sky,
-  AO, fog and clouds as vanilla terrain.
-
-Known limitations:
-
-* DH terrain does not cast shadows into the shadow map.
-* DH water is shaded as an opaque surface (blending for `dh_water` is `off`).
-  This is deliberate: DH's water pass does not go through the vanilla
-  translucent pipeline, and treating it as opaque avoids a second compositor.
-* `dhMaterialId` is not used; LoD materials are inferred from the vertex colour.
-  This avoids depending on an Iris-internal uniform name that has changed
-  between versions.
-
-Disable `DH_BLEND_DEPTH` if a DH version misbehaves with the combined depth.
-
----
+`dhDepthTex`, `dhProjection` and friends are declared in
+`lib/uniforms/iris.glsl` under `#ifdef DISTANT_HORIZONS` and available for future
+use. v0.0.1 does not need them because LOD geometry contributes real g-buffer
+data rather than requiring a combined depth buffer.
 
 ## Voxy
 
-Entry points:
+Voxy generates its own programs around pack-supplied fragment emitters:
 
-* `voxy_opaque.glsl` — writes buffers `1, 2, 3, 14`
-* `voxy_translucent.glsl` — writes buffers `9, 10`
-* `voxy.json` — declares those draw buffers, blending, uniforms and samplers
+- `voxy.json` declares the draw buffers (`1,2,3,4` opaque, `9,10,11`
+  translucent), the blending mode, and the uniforms and samplers the generated
+  program may touch.
+- `voxy_opaque.glsl` and `voxy_translucent.glsl` implement
+  `voxy_emitFragment(VoxyFragmentParameters)`.
+- `excludeLodsFromVanillaDepth` is enabled so Voxy's LODs do not pollute
+  `depthtex0`.
 
-`voxy.json` sets `excludeLodsFromVanillaDepth = true`, matching Iris' Voxy
-integration.
+If Voxy is absent, the files are inert.
 
-**Status: experimental.** Voxy's `VoxyFragmentParameters` ABI is young; this
-release reads only the fields that have been stable across Photon's and
-Complementary's integrations (`sampledColour`, `tinting`, `face`,
-`customId`, `lightMap`). If Voxy changes those, only `voxy_opaque.glsl` and
-`voxy_translucent.glsl` need updating.
+## Vitrail (Vulkan)
 
-Water rendered by Voxy's translucent pass has no surface depth available, so it
-is composited as glass rather than as refractive water. That is a Voxy
-limitation, not a shader bug.
+Vitrail translates the pack to SPIR-V/WGSL. Three properties make that survivable:
 
----
+1. **Explicit version.** Every entry point declares `#version 330 compatibility`
+   rather than relying on a default.
+2. **No implicit conversions.** The source is written for a translator that does
+   not have GLSL's lenient int/float rules: `1.0` never appears as `1`, and
+   `float(i)` is always explicit.
+3. **One state block.** All runtime state is grouped into a single struct whose
+   layout is documented and std140-compatible, which maps onto a descriptor set
+   in one step.
 
-## Vitrail (Vulkan backend)
+The one legacy dependency is unavoidable: the vertex built-ins
+(`gl_Vertex`, `gl_Normal`, `gl_ModelViewMatrix`, `gl_NormalMatrix`,
+`gl_TextureMatrix[0..1]`, `gl_MultiTexCoord0..1`, `gl_Color`) are how the shader
+pack format exposes Minecraft's vertex data. Vitrail supports these; any backend
+that does not would need a shim providing the same names from its own vertex
+format.
 
-Vitrail is a new Vulkan-based renderer that aims to run Iris shader packs. Muon
-is written to be as friendly to it as possible:
+## OptiFine
 
-* no compute, geometry or tessellation shaders
-* no image load/store, no SSBOs
-* explicit `RENDERTARGETS` and `layout(location)` outputs
-* no `gl_FragData` / `gl_FragColor`
-* all buffers sized by ratio, never by absolute pixel count
-* depth treated as `[0, 1]` (Vulkan convention) everywhere
+Not a target. Muon relies on behaviour that Iris defines but OptiFine does not
+guarantee — in particular the `flip.` mechanism, `size.buffer` with explicit
+pixel dimensions, and `program.<name>.enabled`. It may or may not load.
 
-**Status: not verified.** There is no Vitrail build available in the environment
-this pack was developed in. The pack should be expected to work; if it does not,
-the likely culprits are, in order:
+## Known limits
 
-1. fixed-function vertex state (`gl_ModelViewMatrix`, `gl_TextureMatrix[0]`,
-   `gl_MultiTexCoord1`) not being emulated
-2. `const bool colortexNClear` comment declarations not being parsed
-3. per-program `blend.*` rules being ignored
-
-Each of those is isolated: "fixed-function vertex state" lives only in the four
-`*.vsh` shared stages, "clear flags" only in `lib/buffers.glsl`, "blending" only
-in `shaders.properties`. Fixing them for Vitrail will not touch the rendering
-code.
-
----
-
-## rrtt217 HDR mod
-
-Muon detects the mod through the two macros it defines:
-
-```glsl
-#if defined HDR_MOD_INSTALLED && defined HDR_ENABLED
-uniform float HdrGamePeakBrightness;
-uniform float HdrGamePaperWhiteBrightness;
-uniform float HdrGameMinimumBrightness;
-uniform float HdrUIBrightness;
-```
-
-When present, `display_eotf()` in `lib/color.glsl` switches from the fast sRGB
-approximation to the accurate sRGB curve and multiplies by
-`HdrGamePaperWhiteBrightness / max(HdrUIBrightness, 1.0)`. The mod then expands
-the framebuffer to the display's peak brightness. This is the same contract used
-by Photon's HDR fork.
-
-Behaviour:
-
-* 8-bit output keeps dithering; HDR output does not (it would be visible as
-  noise in the highlights).
-* Scene buffers stay `RGBA16F` with or without the mod (`HDR_USE_FP16` is kept
-  as a forward-compatible switch).
-* Paper-white changes propagate live because the ratio is read per frame.
-
----
-
-## Mod interactions
-
-| Mod | Effect |
-| --- | --- |
-| Sodium | recommended, no interaction |
-| Indium / FRAPI | fine; translucent custom geometry uses the vanilla pipeline |
-| Distant Horizons | see above |
-| Voxy | see above |
-| Photonics | not integrated; `PHOTONICS` macros are not defined |
-| Iris `CUSTOM_IMAGES` | optional only, not required |
-| `ENTITY_TRANSLUCENT` | optional only, not required |
-
----
-
-## Resource packs
-
-* **labPBR** is the recommended format (`RESOURCEPACK_SUPPORT = 2`).
-* Legacy `_s` maps work with `RESOURCEPACK_SUPPORT = 1`.
-* No resource pack is required: vanilla textures get hand-tuned material
-  defaults from `lib/materials.glsl`.
-* POM uses albedo luminance as its height field, so no height map is needed, but
-  a pack with strong contrast gives better depth.
-
----
-
-## Known limitations
-
-* Screen-space effects (SSR, RT, contact shadows) cannot see geometry that is
-  off-screen. This is inherent to the technique.
-* The path tracer is screen-space, not hardware ray traced. It inherits the same
-  limitation.
-* The first-person hand is not included in TAA motion vectors; fast movement can
-  ghost slightly on the hand.
-* The End and Nether use simplified skies (no atmospheric integration, no
-  volumetric cloud layers in the Nether).
-* Shadow casting for DH/Voxy LoD geometry is not implemented.
+- **Single hardware shadow cascade.** Iris provides one shadow map per frame, so
+  Muon's second cascade is screen-space.
+- **Single translucent layer.** The nearest translucent fragment per pixel is
+  stored; stacked glass and water behind glass are approximated.
+- **Screen-space GI.** Off-screen geometry falls back to the analytic sky.
+- **Vanilla cloud renderer disabled.** Muon draws its own; the `clouds=off`
+  property is intentional and not a bug.
+- **No HDR output yet.** The final pass emits Rec.709 sRGB and lets Iris' colour
+  space conversion adapt it. A PQ/HLG-aware path is roadmap.

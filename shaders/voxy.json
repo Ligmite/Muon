@@ -1,18 +1,11 @@
 {
-    "unusedString":
-        "
-            // voxy.json is preprocessed by Iris, so settings can be included
-            // here for conditional configuration. The GLSL entry points live
-            // in voxy_opaque.glsl / voxy_translucent.glsl.
-            #include \"/settings.glsl\"
-        ",
     "version": 1,
     "excludeLodsFromVanillaDepth": true,
-    "opaqueDrawBuffers": [1, 2, 3, 14],
-    "translucentDrawBuffers": [9, 10],
+    "opaqueDrawBuffers": [1, 2, 3, 4],
+    "translucentDrawBuffers": [9, 10, 11],
     "blending": {
-        -1: "off",
-        0: "ONE ONE_MINUS_SRC_ALPHA ONE ONE_MINUS_SRC_ALPHA"
+        "-1": "off",
+        "0": "ONE ONE_MINUS_SRC_ALPHA ONE ONE_MINUS_SRC_ALPHA"
     },
     "useViewportDims": true,
     "uniforms": [
@@ -30,36 +23,46 @@
         "previousCameraPosition",
         "near",
         "far",
+        "frameTime",
         "frameTimeCounter",
         "frameCounter",
         "sunAngle",
+        "sunPosition",
+        "moonPosition",
+        "upPosition",
         "rainStrength",
         "wetness",
-        "world",
+        "thunderStrength",
+        "worldTime",
+        "worldDay",
         "moonPhase",
         "isEyeInWater",
         "blindness",
         "nightVision",
         "darknessFactor",
         "eyeAltitude",
-        "sunPosition",
-        "moonPosition",
-        "shadowLightPosition",
-        "upPosition",
-        "viewWidth",
-        "viewHeight",
-        "aspectRatio",
+        "eyeBrightness",
         "eyeBrightnessSmooth",
         "heldBlockLightValue",
-        "heldBlockLightValue2"
+        "temperature",
+        "rainfall",
+        "biome",
+        "biome_category",
+        "biome_precipitation",
+        "seaLevel",
+        "alphaTestRef",
+        "screenBrightness",
+        "viewWidth",
+        "viewHeight"
     ],
     "samplers": [
         "noisetex",
+        "depthtex0",
+        "depthtex1",
         "colortex1",
         "colortex2",
         "colortex3",
-        "colortex14",
-        "depthtex0",
-        "depthtex1"
+        "colortex4",
+        "colortex14"
     ]
 }

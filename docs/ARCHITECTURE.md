@@ -1,162 +1,202 @@
 # Architecture
 
-Muon is a deferred renderer with a screen-space path tracer bolted on. This
-document describes the frame, the buffers, the coordinate spaces and where each
-piece of maths lives, so that changes stay local and the code stays portable.
+This document explains how Muon is put together and, more importantly, *why* it
+is put together that way. The design is driven by three constraints:
 
----
+1. It has to be an Iris pack today, with the whole modern feature set.
+2. It has to be translatable to a Vulkan/SPIR-V backend (Vitrail) and eventually
+   to a WGSL/Rust renderer (Horizon) without a rewrite.
+3. It has to be maintainable by one person, which means no lighting equation may
+   exist in two places.
 
-## The frame, in order
-
-| # | Program | Reads | Writes | Resolution | Purpose |
-| --- | --- | --- | --- | --- | --- |
-| 1 | `shadow`, `shadow_*` | geometry | shadowtex0/1 | `shadowMapResolution` | Distorted orthographic shadow map |
-| 2 | `gbuffers_*` | textures | 1, 2, 3, 14 | full | Surface data |
-| 3 | `gbuffers_sky*` | — | 0 | full | Clears sky so `depth == 1` marks it |
-| 4 | `gbuffers_water`, `*_translucent` | textures | 9, 10 | full | Premultiplied translucent layer |
-| 5 | `deferred` | depth, 2 | 4 | ½ | GTAO / SSAO |
-| 6 | `deferred1` | depth, shadow | 6 | ½ | Volumetric fog and light shafts |
-| 7 | `deferred2` | depth, shadow | 7 | ½ | Volumetric clouds |
-| 8 | `deferred3` | 1, 2, 3, 14, 12 | 8 | full | Path tracer, temporally accumulated |
-| 9 | `deferred4` | 1, 2, 3, 4, 5, 8, 14, depth | 0, 12 | full | Opaque shading + sky |
-| 10 | `composite` | 0, 4, 5, 6, 7, 9, 10 | 11 | full | Translucents, clouds, fog |
-| 11 | `composite1` | 11, 5 | 0 | full | TAA |
-| 12 | `composite2` | 0 | 6 | ½ | Bloom prefilter |
-| 13 | `composite3` | 6 | 7 | ½ | Bloom blur H |
-| 14 | `composite4` | 7 | 6 | ½ | Bloom blur V |
-| 15 | `composite5` | 0, depth | 11, 5 | full | DOF + motion blur, history copy |
-| 16 | `composite6` | 11, 6 | 13 | full | Exposure, grade, tonemap |
-| 17 | `final` | 13, 6, 14 | screen | full | FXAA/CAS, dither, HDR encode |
-
-No pass reads a buffer it writes. Where ping-pong is needed (TAA history, RT
-history), the write goes to a different buffer and the copy happens in a later
-pass:
-
-* RT: `deferred3` reads `12`, writes `8`; `deferred4` copies `8` back into `12`.
-* TAA: `composite1` reads `5`, writes `0`; `composite5` copies `0` into `5`.
-
----
-
-## Buffers
-
-| Buffer | Format | Size | Contents |
-| --- | --- | --- | --- |
-| 0 | RGBA16F | 1 | Scene colour, HDR, linear Rec.709 |
-| 1 | RGBA16 | 1 | albedo.rgb, material id / 255 |
-| 2 | RGBA16 | 1 | octahedral normal.xy, roughness, metalness |
-| 3 | RGBA16 | 1 | emission (Reinhard compressed), subsurface, vanilla AO, F0 |
-| 4 | RGBA16 | ½ | ambient occlusion |
-| 5 | RGBA16F | 1 | TAA history **and** SSR source |
-| 6 | RGBA16F | ½ | volumetric in-scatter.rgb, transmittance |
-| 7 | RGBA16F | ½ | cloud in-scatter.rgb, transmittance |
-| 8 | RGBA16F | 1 | ray tracing radiance + normalised history length |
-| 9 | RGBA16 | 1 | translucent normal.xy, surface depth, flags |
-| 10 | RGBA16F | 1 | translucent premultiplied colour + alpha |
-| 11 | RGBA16F | 1 | composite scratch / DOF output |
-| 12 | RGBA16F | 1 | ray tracing history |
-| 13 | RGBA16F | 1 | tonemapped LDR image |
-| 14 | RGBA16 | 1 | skylight, blocklight, porosity, wetness |
-| 15 | RGBA16F | 1 | spare |
-
-`5` and `12` are **not** cleared per frame (`lib/buffers.glsl`). Everything else
-is either fully rewritten or needs clearing (`9`, `10` because they accumulate
-translucent fragments).
-
----
-
-## Coordinate spaces
-
-* **screen** — `uv ∈ [0,1]`, depth `[0,1]`.
-* **view** — camera at origin, `-Z` forward, axes follow the camera.
-* **scene** — camera at origin, world-aligned axes. The sun direction is
-  constant in this space, so it is what lighting, clouds and the atmosphere use.
-* **world** — scene + `cameraPosition`.
-
-G-buffer normals are stored in **scene space** (the vertex stage rotates them
-once), which removes a matrix multiply from every deferred pixel.
-
-Hand pixels use a compressed depth range; `fix_hand_depth()` in `lib/space.glsl`
-expands them. Anything that reconstructs positions from `depthtex1` must go
-through `screen_to_view_space()`, which does this automatically when asked.
-
----
-
-## Library map
-
-| File | Responsibility | Portable to WGSL |
-| --- | --- | --- |
-| `lib/common.glsl` | constants, macros, small maths, HDR macro plumbing | trivially |
-| `lib/uniforms.glsl` | the loader uniform block | becomes a WGSL uniform struct |
-| `lib/space.glsl` | space transforms, motion vectors, depth | trivially |
-| `lib/random.glsl` | integer hashing, R2/Halton, blue noise, sampling | trivially (uint ops map 1:1) |
-| `lib/noise.glsl` | value/gradient noise, FBM, Worley, curl, caustics | trivially |
-| `lib/color.glsl` | transfer functions, colour spaces, tonemappers, grade | trivially |
-| `lib/brdf.glsl` | GGX, Smith, Fresnel, multi-scatter, phases | trivially |
-| `lib/materials.glsl` | material ids, labPBR decode, waving, hardcoded overrides | trivially |
-| `lib/encoding.glsl` | octahedral normals, G-buffer pack/unpack, combined depth | trivially |
-| `lib/shadow.glsl` | shadow projection, bias, PCSS, contact shadows | trivially |
-| `lib/atmosphere.glsl` | single-scattering sky, sun/moon discs, stars, galaxy, aurora | trivially |
-| `lib/clouds.glsl` | four cloud layers, cloud lighting, cloud shadows | trivially |
-| `lib/ao.glsl` | GTAO and SSAO | trivially |
-| `lib/ssr.glsl` | SSR ray march and environment fallback | trivially |
-| `lib/volumetrics.glsl` | fog medium, raymarch, upsampling | trivially |
-| `lib/water.glsl` | wave normals, caustics, absorption, refraction | trivially |
-| `lib/lighting.glsl` | `SurfaceData`, `shade_surface`, light colours, shadow composition | trivially |
-| `lib/gbuffer.glsl` | reads the G-buffer back into `SurfaceData` | trivially |
-| `lib/pathtracing.glsl` | screen-space path tracer, NEE, MIS-lite | needs care (loops, structs) |
-| `lib/denoise.glsl` | temporal accumulation, bilateral filter | trivially |
-| `lib/post.glsl` | TAA, bloom, DOF, motion blur, FXAA, CAS, grade operators | trivially |
-| `lib/buffers.glsl` | Iris clear flags (comment block) | not portable (loader config) |
-
-The rule: **no file outside `lib/` and `program/` may contain maths.** Program
-files are thin wrappers; that is what makes a future WGSL port mechanical.
-
----
-
-## Data flow for a shaded pixel
+## Layers
 
 ```
-gbuffer_fsh
-  albedo      <- sRGB decode of gtexture * tint
-  material    <- mc_Entity.x -> block.properties id -> MAT_*
-  normal      <- TBN * normal map, rotated to scene space
-  roughness   <- labPBR / material default / hardcoded
-  f0, metal   <- labPBR F0 heuristic or material
-  emission    <- material + labPBR emission channel
-  ao          <- vanilla AO in gl_Color.a
-  light levels<- multi-tex-coord-1 / 240
-        |
-        v
-deferred4
-  depth       -> scene position, view direction
-  AO          <- colortex4, blurred into vanilla AO
-  shadow      <- PCSS + contact shadows + cloud shadows
-  reflection  <- SSR (colortex5) mixed with analytic sky
-  indirect    <- RAY_TRACING: colortex8 (temporal + bilateral) mixed with raster
-  colour      <- shade_surface(SurfaceData, light_dir, reflection)
-        |
-        v
-composite
-  cloudy      <- colour * cloudT + cloudScatter
-  water       <- refraction (Beer-Lambert) + SSR + sun highlight + foam
-  fog         <- colour * fogT + fogScatter
-        |
-        v
-TAA -> DOF/motion blur -> exposure -> grade -> tonemap -> AA -> HDR encode
+shaders/*.vsh | *.fsh          generated entry points (46 programs, 92 files)
+        │
+        ├── shaders/program/   the passes themselves
+        │
+        └── shaders/lib/       the renderer
+                ├── uniforms/  loader-facing declarations and the frame block
+                └── common/    platform-agnostic algorithms
 ```
 
----
+The dependency arrow only ever points downward. `lib/common/` never mentions a
+program name, a render target, or an Iris directive. That layer is the part that
+could be dropped into a different engine unchanged; the passes are the part that
+knows about Minecraft.
 
-## Design rules
+### `lib/uniforms/`
 
-1. **One place for the display transform.** Only `final.fsh` calls
-   `display_eotf()`. Only `composite6.fsh` tonemaps.
-2. **One place for the sun colour.** `direct_light_color()` in `lib/lighting.glsl`
-   combines the blackbody spectrum with atmospheric extinction; nothing else
-   invents a sun colour.
-3. **Static loops.** Loops use settings constants so drivers can unroll them and
-   so the code maps cleanly onto WGSL.
-4. **No compute shaders.** Everything is a fragment pass, which keeps OptiFine,
-   Iris, Vulkan-style backends and a future Rust renderer on the same path.
-5. **No `gl_FragData`.** Explicit `layout(location = N) out` plus
-   `/* RENDERTARGETS: ... */` is unambiguous for every backend.
+| File | Responsibility |
+|---|---|
+| `iris.glsl` | every loader-injected uniform, declared exactly once |
+| `frame.glsl` | `MuonFrame`: the per-frame state block and its adapter |
+| `settings.glsl` | compile-time options as named constants |
+| `samplers.glsl` | every sampler the pack creates itself |
+
+### `lib/common/`
+
+| File | Responsibility |
+|---|---|
+| `constants.glsl` | target indices, material ids, flags, physical constants |
+| `math.glsl` | scalars, vectors, geometry, numerical hygiene |
+| `encoding.glsl` | octahedral normals, unorm packing, depth conversion |
+| `random.glsl` | integer hashes, PCG, Halton, R2, blue noise |
+| `noise.glsl` | value/gradient/Worley noise, fBm, caustics, 3D volume sampling |
+| `color.glsl` | transfer functions, luminance, hue rotation, blackbody |
+| `tonemap.glsl` | AgX, ACES, Reinhard, soft knee |
+| `sampling.glsl` | hemisphere, cone, GGX, Vogel, concentric disk |
+| `brdf.glsl` | GGX distribution, Smith visibility, Fresnel, IBL, LabPBR mapping |
+| `material.glsl` | the `MuonMaterial` struct and material rules (wetness, snow) |
+| `texture.glsl` | LabPBR decode, normal maps, parallax occlusion mapping |
+| `gbuffer_write.glsl` | g-buffer encoders (geometry stages only) |
+| `gbuffer_read.glsl` | g-buffer decoders (shading stages only) |
+| `shadow.glsl` | PCSS, PCF, screen-space cascade, combined visibility |
+| `atmosphere.glsl` | sky radiance, sun/moon colour, aerial perspective |
+| `clouds.glsl` | cloud density field, raymarch, cloud shadows |
+| `volumetric.glsl` | fog medium, volumetric integration, god rays |
+| `water.glsl` | Gerstner waves, Fresnel, refraction, Beer-Lambert, caustics |
+| `gtao.glsl` | horizon search, GTAO integral, SSAO kernel |
+| `ssr.glsl` | reflection march, hit refinement, composition |
+| `taa.glsl` | jitter, velocity, YCoCg clipping, resolve |
+| `sss.glsl` | foliage transmission and screen-space gather |
+| `raytrace.glsl` | screen-space path tracer, multi-bounce iteration, denoiser |
+| `wetness.glsl` | puddles, ripples, snow cover |
+| `waving.glsl` | foliage and water vertex animation |
+| `bloom.glsl`, `dof.glsl`, `lensflare.glsl`, `post.glsl` | post-processing |
+
+## Pass graph
+
+```
+                     ┌──────────┐
+                     │  shadow  │  hardware shadow map
+                     └────┬─────┘
+                          │
+   ┌──────────────────────┴──────────────────────┐
+   │                                            │
+┌──▼─────────────┐                     ┌────────▼────────┐
+│ gbuffers_*     │ 1,2,3,4             │ gbuffers_water  │ 9,10,11
+│ opaque         │                     │ translucent     │
+└──┬─────────────┘                     └────────┬────────┘
+   │                                            │
+┌──▼──────────┐  GTAO → 14 (half)                │
+│ deferred    │                                 │
+└──┬──────────┘                                 │
+   │                                            │
+┌──▼──────────┐  lighting + sky + clouds → 0    │
+│ deferred1   │                                 │
+└──┬──────────┘                                 │
+   │                                            │
+┌──▼──────────┐  water + volumetrics → 0 ◄──────┘  (flip)
+│ deferred2   │
+└──┬──────────┘
+   │
+┌──▼──────────┐  exposure → 12 (64×64, flip)
+│ composite   │
+└──┬──────────┘
+   │
+┌──▼──────────┐  SSR + GI → 13, 7 (flip)
+│ composite1  │
+└──┬──────────┘
+   │
+┌──▼──────────┐  indirect + god rays + velocity → 15, 8
+│ composite2  │
+└──┬──────────┘
+   │
+┌──▼──────────┐  TAA → 0, 5 (flip)
+│ composite3  │
+└──┬──────────┘
+   │
+┌──▼──────────┐  DoF → 15
+│ composite4  │
+└──┬──────────┘
+   │
+┌──▼──────────┐  bloom bright → 6 (mip chain)
+│ composite5  │
+└──┬──────────┘
+   │
+┌──▼──────────┐  bloom upsample → 0
+│ composite6  │
+└──┬──────────┘
+   │
+┌──▼──────────┐  tonemap + grade + sRGB → screen
+│    final    │
+└─────────────┘
+```
+
+The chain is a strict alternation of full-resolution RGBA16F buffers, with three
+half/quarter-resolution exceptions (AO, exposure) and one mip pyramid (bloom).
+Every pass reads only what an earlier pass wrote, except the four flipped passes
+which read and write the same target.
+
+## Decisions worth explaining
+
+### Why a fully deferred pipeline
+
+Forward lighting in the geometry stage would need the sun, the moon, PCSS, cloud
+shadows, block light, sky ambient, GTAO and SSS inside `gbuffers_terrain`,
+`gbuffers_entities`, `gbuffers_hand`, `gbuffers_water`, `dh_terrain` and the Voxy
+emitters — six copies of the same equations. Deferring means one copy, and it
+means a single place to fix a bias or change a BRDF.
+
+The cost is that translucents cannot be forward-blended into the colour target.
+Muon handles that with the separate translucent g-buffer rather than by giving up
+and duplicating the shader.
+
+### Why the sun's shadow term is computed in the lighting pass, not on geometry
+
+PCSS needs a blocker search over the shadow map, which needs the depth map, which
+does not exist during the geometry pass. It also cannot be baked per vertex
+because the penumbra is a per-fragment property.
+
+### Why the sky is not `gbuffers_skybasic`
+
+The atmosphere model that draws the sky is the same model that produces the sun
+colour, the ambient irradiance and the aerial perspective. Drawing the sky in a
+geometry stage would mean a second copy of that model, and the two would drift.
+Instead the vanilla sky, sun, moon, stars and clouds are disabled and `deferred1`
+writes sky pixels, identified by the far depth.
+
+### Why fog is applied in `deferred2`
+
+Fog is a medium between the eye and everything else, so it has to cover the water
+surface too. Applying it in the lighting pass would leave water hovering in front
+of the fog instead of inside it.
+
+### Why the path tracer is screen-space
+
+A world-space tracer needs either hardware ray tracing or a persistent voxel
+volume. Iris can provide a storage buffer (`image.` custom images), but Vitrail's
+support for custom images is not something this version wants to bet on, and a
+voxel volume would need its own building pass, its own memory budget and its own
+denoiser. The screen-space tracer is implemented so that the *gathering* step
+(`muon_trace_gi_ray`) can be replaced by a world-space hit test without changing
+`muon_trace_gi`, the bounce iteration, the denoiser or the passes that consume
+the result.
+
+## Quality knobs
+
+`QUALITY` (0–3) is the master switch, set by the presets. Everything else derives
+from it in the "derived constants" block of `settings.glsl`:
+
+| Quality | Volumetric steps | Cloud steps | Shadow taps | AO slices × steps | Reflection taps |
+|---|---|---|---|---|---|
+| 0 (Low) | FOG/2 | CLOUD/2 | SHADOW/2 | 1 × 3 | 0 |
+| 1 (Medium) | FOG | CLOUD | SHADOW | 2 × GTAO_STEPS | 1 |
+| 2 (High) | FOG+4 | CLOUD | SHADOW | GTAO_SLICES × GTAO_STEPS | 2 |
+| 3 (Ultra) | FOG×2 | CLOUD+16 | SHADOW | GTAO_SLICES × (GTAO_STEPS+2) | 3 |
+
+`SHADOW_SAMPLES`, `FOG_STEPS` and `CLOUD_STEPS` are themselves user options, so a
+preset can move the base value and the quality multiplier still applies.
+
+## Where to change things
+
+| Task | File |
+|---|---|
+| add a user option | `shaders/settings.glsl`, then a screen in `shaders/shaders.properties`, then `lib/uniforms/settings.glsl` if a `const` alias helps |
+| change the look of the grade | `lib/common/post.glsl` |
+| change the tonemap | `lib/common/tonemap.glsl` |
+| tune the water optics | `lib/common/water.glsl`, constants at the top |
+| add a material | `lib/common/constants.glsl`, `block.properties`, `muon_classify_block` in `program/gbuffers_solid.vsh` |
+| add a pass | a file in `program/`, an entry in `tools/gen_wrappers.py`, a target in `shaders.properties`, then `python tools/gen_wrappers.py` |

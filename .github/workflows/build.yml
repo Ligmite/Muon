@@ -1,0 +1,50 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Validate and package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build dependencies
+        run: python -m pip install --upgrade pip numpy pillow
+
+      - name: Static validation
+        run: python tools/validate.py
+
+      - name: Generated wrappers are up to date
+        run: python tools/gen_wrappers.py --check
+
+      - name: Noise assets are reproducible
+        run: python tools/gen_noise.py --check
+
+      - name: Package
+        env:
+          MUON_OUTPUT_ROOT: ${{ github.workspace }}
+        run: python tools/package.py --skip-checks
+
+      - name: Upload release archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: muon-shaderpack
+          path: release/*.zip
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.zip
+          body_path: CHANGELOG.md

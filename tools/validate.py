@@ -1,662 +1,798 @@
 #!/usr/bin/env python3
 """
-Muon Shaders - static validator.
+Muon Shaders - tools/validate.py
 
-There is no GLSL compiler available in CI for an OptiFine/Iris pack, so this
-tool does the next best thing:
+Static validation for the shader pack. It is not a GLSL compiler; it is the
+safety net that catches the failure modes a shader pack actually has:
 
-  * a faithful C-style preprocessor (#include, #if/#ifdef/#elif/#else/#endif,
-    object-like and function-like #define, #undef)
-  * include resolution against the shaders/ root
-  * brace / paren / bracket balance checks
-  * undefined function-call detection (the single most common GLSL mistake)
-  * duplicate function detection
-  * RENDERTARGETS / #version / main() presence checks
-  * option cross-checks between settings.glsl and shaders.properties
+  * a missing or misspelled #include
+  * a function used before it is declared (GLSL requires declaration order)
+  * an undeclared identifier used as a function
+  * unbalanced braces or parentheses
+  * a fragment stage that declares an input its vertex stage does not output
+  * a uniform declared twice with different types
+  * a fragment pass with outputs but no RENDERTARGETS directive
+  * an option used in shaders.properties that does not exist in settings.glsl
+  * a profile or slider that names an unknown option
+  * a missing preset, or the wrong preset order
+  * leftover placeholder markers
+  * referenced textures that do not exist or have the wrong dimensions
 
-Exit code is non-zero if any error was found.
+Usage:
+    python tools/validate.py [--verbose]
 """
 
 from __future__ import annotations
 
 import argparse
-import json
-import os
 import re
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 
-SHADERS_DIR = "shaders"
+ROOT = Path(__file__).resolve().parent.parent
+SHADERS = ROOT / "shaders"
 
-IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-INCLUDE_RE = re.compile(r'^\s*#\s*include\s+"([^"]+)"')
-DIRECTIVE_RE = re.compile(r"^\s*#\s*(\w+)\s*(.*)$")
-
-KEYWORDS = {
-    "if", "for", "while", "switch", "return", "else", "do", "case", "default",
-    "break", "continue", "discard", "struct", "layout", "in", "out", "inout",
-    "const", "uniform", "attribute", "varying", "flat", "smooth", "noperspective",
-    "centroid", "precision", "highp", "mediump", "lowp", "void", "bool", "int",
-    "uint", "float", "double", "true", "false", "defined", "sizeof", "using",
-}
-
-BUILTIN_TYPES = {
-    "vec2", "vec3", "vec4", "ivec2", "ivec3", "ivec4", "uvec2", "uvec3", "uvec4",
-    "bvec2", "bvec3", "bvec4", "dvec2", "dvec3", "dvec4",
+GLSL_BUILTINS = {
+    # types
+    "float", "int", "uint", "bool", "double", "vec2", "vec3", "vec4", "ivec2",
+    "ivec3", "ivec4", "uvec2", "uvec3", "uvec4", "bvec2", "bvec3", "bvec4",
     "mat2", "mat3", "mat4", "mat2x2", "mat2x3", "mat2x4", "mat3x2", "mat3x3",
-    "mat3x4", "mat4x2", "mat4x3", "mat4x4",
-    "float16_t", "f16vec2", "f16vec3", "f16vec4",
+    "mat3x4", "mat4x2", "mat4x3", "mat4x4", "sampler1D", "sampler2D",
+    "sampler3D", "samplerCube", "sampler2DShadow", "sampler2DArray",
+    # constructors / conversion
+    "vec2", "vec3", "vec4", "texture", "textureLod", "textureGrad", "texelFetch",
+    "textureSize", "textureOffset", "textureProj", "texture2D", "texture2DLod",
+    # maths
+    "abs", "acos", "acosh", "all", "any", "asin", "asinh", "atan", "atanh",
+    "ceil", "clamp", "cos", "cosh", "cross", "degrees", "determinant", "distance",
+    "dot", "equal", "exp", "exp2", "faceforward", "floor", "fma", "fract",
+    "greaterThan", "greaterThanEqual", "inverse", "inversesqrt", "isinf", "isnan",
+    "length", "lessThan", "lessThanEqual", "log", "log2", "matrixCompMult", "max",
+    "min", "mix", "mod", "modf", "normalize", "not", "notEqual", "pow",
+    "radians", "reflect", "refract", "round", "roundEven", "sign", "sin", "sinh",
+    "smoothstep", "sqrt", "step", "tan", "tanh", "transpose", "trunc",
+    "dFdx", "dFdy", "fwidth", "packHalf2x16", "unpackHalf2x16", "floatBitsToInt",
+    "intBitsToFloat", "uintBitsToFloat", "floatBitsToUint", "bitCount",
+    "findLSB", "findMSB", "outerProduct", "ldexp", "frexp", "interpolateAtCentroid",
+    "ftransform", "shadow2D", "texture2DProj", "texture3D", "textureCube", "vec2", "vec3", "vec4",
 }
 
-BUILTIN_FUNCS = {
-    # angle / trig
-    "radians", "degrees", "sin", "cos", "tan", "asin", "acos", "atan", "sinh",
-    "cosh", "tanh", "asinh", "acosh", "atanh",
-    # exponential
-    "pow", "exp", "log", "exp2", "log2", "sqrt", "inversesqrt",
-    # common
-    "abs", "sign", "floor", "trunc", "round", "roundEven", "ceil", "fract",
-    "mod", "modf", "min", "max", "clamp", "mix", "step", "smoothstep",
-    "isnan", "isinf", "floatBitsToInt", "floatBitsToUint", "intBitsToFloat",
-    "uintBitsToFloat", "fma", "frexp", "ldexp",
-    # geometric
-    "length", "distance", "dot", "cross", "normalize", "faceforward", "reflect",
-    "refract", "matrixCompMult", "outerProduct", "transpose", "determinant",
-    "inverse",
-    # vector relational
-    "lessThan", "lessThanEqual", "greaterThan", "greaterThanEqual", "equal",
-    "notEqual", "any", "all", "not",
-    # texture
-    "texture", "textureProj", "textureLod", "textureOffset", "texelFetch",
-    "texelFetchOffset", "textureProjOffset", "textureLodOffset",
-    "textureProjLod", "textureProjLodOffset", "textureGrad", "textureGradOffset",
-    "textureProjGrad", "textureProjGradOffset", "textureSize", "textureQueryLod",
-    "textureQueryLevels", "textureSamples", "textureGather", "textureGatherOffset",
-    "textureGatherOffsets",
-    # derivatives
-    "dFdx", "dFdy", "fwidth", "dFdxFine", "dFdyFine", "dFdxCoarse", "dFdyCoarse",
-    # interpolation
-    "interpolateAtCentroid", "interpolateAtSample", "interpolateAtOffset",
-    # packing
-    "packUnorm2x16", "packSnorm2x16", "packUnorm4x8", "packSnorm4x8",
-    "unpackUnorm2x16", "unpackSnorm2x16", "unpackUnorm4x8", "unpackSnorm4x8",
-    "packDouble2x32", "unpackDouble2x32", "packHalf2x16", "unpackHalf2x16",
-    "bitfieldExtract", "bitfieldInsert", "bitfieldReverse", "bitCount",
-    "findLSB", "findMSB", "uaddCarry", "usubBorrow", "umulExtended",
-    "imulExtended", "atomicAdd", "atomicMin", "atomicMax", "atomicAnd",
-    "atomicOr", "atomicXor", "atomicExchange", "atomicCompSwap", "memoryBarrier",
-    "barrier", "groupMemoryBarrier", "imageLoad", "imageStore", "imageSize",
-    "imageAtomicAdd", "imageAtomicMin", "imageAtomicMax", "imageAtomicAnd",
-    "imageAtomicOr", "imageAtomicXor", "imageAtomicExchange", "imageAtomicCompSwap",
-    "subgroupAdd", "subgroupBallot", "subgroupElect", "subgroupAll",
-    "subgroupAny", "subgroupBroadcast",
-    # compatibility profile built-ins
-    "ftransform", "texture2D", "texture3D", "textureCube", "shadow2D", "shadow2DProj",
-    # misc
-    "int", "uint", "float", "bool",
+GLSL_KEYWORDS = {
+    "if", "else", "for", "while", "do", "switch", "case", "default", "break",
+    "continue", "return", "discard", "struct", "in", "out", "inout", "uniform",
+    "const", "flat", "smooth", "noperspective", "layout", "location", "highp",
+    "mediump", "lowp", "precision", "void", "true", "false", "defined", "buffer",
+    "shared", "coherent", "volatile", "restrict", "readonly", "writeonly",
 }
 
 
-# ---------------------------------------------------------------------------
-# Sources
-# ---------------------------------------------------------------------------
-
 @dataclass
-class Line:
-    text: str
-    file: str
-    lineno: int
-
-
-@dataclass
-class Program:
-    path: str
-    lines: list[Line] = field(default_factory=list)
-
-
-class Preprocessor:
-    def __init__(self, root: str, define_overrides: dict[str, str] | None = None):
-        self.root = os.path.abspath(root)
-        self.defines: dict[str, str] = {}
-        self.func_macros: set[str] = set()
-        self.errors: list[str] = []
-        self.stack: list[str] = []
-        if define_overrides:
-            self.defines.update(define_overrides)
-
-    # -- helpers ---------------------------------------------------------
-    def resolve(self, current_file: str, target: str) -> str | None:
-        if target.startswith("/"):
-            cand = os.path.join(self.root, target.lstrip("/"))
-        else:
-            cand = os.path.join(os.path.dirname(current_file), target)
-        cand = os.path.normpath(cand)
-        if not cand.startswith(self.root):
-            return None
-        return cand if os.path.isfile(cand) else None
-
-    def expand(self, text: str, depth: int = 0) -> str:
-        """Expand object-like macros (one pass, repeated a few times)."""
-        if depth > 8:
-            return text
-        out = text
-        changed = True
-        passes = 0
-        while changed and passes < 8:
-            changed = False
-            passes += 1
-            for name, value in self.defines.items():
-                if name in ("__LINE__",):
-                    continue
-                pattern = re.compile(r"\b" + re.escape(name) + r"\b")
-                new = pattern.sub(value, out)
-                if new != out:
-                    out = new
-                    changed = True
-        return out
-
-    # -- expression evaluation -------------------------------------------
-    def eval_condition(self, expr: str, where: str) -> bool:
-        expr = expr.strip()
-
-        def defined_sub(m: re.Match) -> str:
-            name = m.group(1)
-            return "1" if name in self.defines else "0"
-
-        expr = re.sub(r"defined\s*\(\s*([A-Za-z_]\w*)\s*\)", defined_sub, expr)
-        expr = re.sub(r"defined\s+([A-Za-z_]\w*)", defined_sub, expr)
-
-        # expand macros
-        for _ in range(6):
-            new = self.expand(expr)
-            if new == expr:
-                break
-            expr = new
-
-        # unknown identifiers become 0, like the C preprocessor
-        def unknown(m: re.Match) -> str:
-            word = m.group(0)
-            if word in ("and", "or", "not", "True", "False"):
-                return word
-            return "0"
-
-        expr = re.sub(r"[A-Za-z_]\w*", unknown, expr)
-        expr = expr.replace("&&", " and ").replace("||", " or ")
-        expr = re.sub(r"!(?!=)", " not ", expr)
-        expr = expr.replace("/", " / ")  # C integer division differs; our uses are floats
-        try:
-            return bool(eval(expr, {"__builtins__": {}}, {}))
-        except Exception as exc:  # pragma: no cover - diagnostics only
-            self.errors.append(f"{where}: cannot evaluate condition '{expr}' ({exc})")
-            return False
-
-    # -- main ------------------------------------------------------------
-    def run(self, path: str) -> Program:
-        program = Program(path=path)
-        self._process_file(path, program, top=True)
-        return program
-
-    def _process_file(self, path: str, program: Program, top: bool = False) -> None:
-        if path in self.stack:
-            self.errors.append(f"circular include: {' -> '.join(self.stack + [path])}")
-            return
-        if not os.path.isfile(path):
-            self.errors.append(f"missing file: {path}")
-            return
-
-        self.stack.append(path)
-
-        # conditional stack: (parent_active, branch_taken, current_active)
-        cond: list[list[bool]] = []
-
-        def active() -> bool:
-            return all(c[2] for c in cond)
-
-        with open(path, "r", encoding="utf-8", errors="replace") as handle:
-            raw_text = handle.read()
-
-        # Handle backslash line continuations before splitting into lines
-        raw_text = raw_text.replace("\\\r\n", " ").replace("\\\n", " ")
-        raw_lines = raw_text.splitlines()
-
-        in_block_comment = False
-
-        for lineno, raw in enumerate(raw_lines, start=1):
-            text = raw
-            where = f"{os.path.relpath(path, self.root)}:{lineno}"
-
-            # Preserve the RENDERTARGETS / DRAWBUFFERS markers: they live inside
-            # block comments that the analyser would otherwise drop.
-            if "RENDERTARGETS" in text or "DRAWBUFFERS" in text:
-                program.lines.append(Line(text, path, lineno))
-
-            # strip comments but keep the line structure
-            stripped, in_block_comment = self._strip_comments(text, in_block_comment)
-
-            m = DIRECTIVE_RE.match(stripped)
-            if m:
-                directive = m.group(1)
-                rest = m.group(2).strip()
-
-                if directive == "if":
-                    parent = active()
-                    value = self.eval_condition(rest, where) if parent else False
-                    cond.append([parent, value, parent and value])
-                    continue
-                if directive == "ifdef":
-                    parent = active()
-                    name = rest.split()[0] if rest else ""
-                    value = name in self.defines
-                    cond.append([parent, value, parent and value])
-                    continue
-                if directive == "ifndef":
-                    parent = active()
-                    name = rest.split()[0] if rest else ""
-                    value = name not in self.defines
-                    cond.append([parent, value, parent and value])
-                    continue
-                if directive == "elif":
-                    if not cond:
-                        self.errors.append(f"{where}: #elif without #if")
-                        continue
-                    parent, taken, _ = cond[-1]
-                    value = self.eval_condition(rest, where) if parent and not taken else False
-                    cond[-1] = [parent, taken or value, parent and not taken and value]
-                    continue
-                if directive == "else":
-                    if not cond:
-                        self.errors.append(f"{where}: #else without #if")
-                        continue
-                    parent, taken, _ = cond[-1]
-                    cond[-1] = [parent, True, parent and not taken]
-                    continue
-                if directive == "endif":
-                    if not cond:
-                        self.errors.append(f"{where}: #endif without #if")
-                        continue
-                    cond.pop()
-                    continue
-
-                if not active():
-                    continue
-
-                if directive == "include":
-                    inc = INCLUDE_RE.match(stripped)
-                    if not inc:
-                        self.errors.append(f"{where}: malformed #include")
-                        continue
-                    target = self.resolve(path, inc.group(1))
-                    if target is None:
-                        self.errors.append(f"{where}: cannot resolve include '{inc.group(1)}'")
-                        continue
-                    self._process_file(target, program)
-                    continue
-
-                if directive == "define":
-                    self._handle_define(rest, where)
-                    continue
-
-                if directive == "undef":
-                    name = rest.split()[0] if rest else ""
-                    self.defines.pop(name, None)
-                    continue
-
-                if directive in ("version", "extension", "pragma", "error"):
-                    if directive == "error":
-                        self.errors.append(f"{where}: #error {rest}")
-                    # keep version/extension lines in the output
-                    if directive == "version":
-                        program.lines.append(Line(f"#version {rest}", path, lineno))
-                    elif directive == "extension":
-                        program.lines.append(Line(f"#extension {rest}", path, lineno))
-                    continue
-
-                # any other directive is passed through
-                program.lines.append(Line(stripped, path, lineno))
-                continue
-
-            if not active():
-                continue
-
-            program.lines.append(Line(stripped, path, lineno))
-
-        if cond:
-            self.errors.append(f"{os.path.relpath(path, self.root)}: unterminated #if")
-
-        self.stack.pop()
-
-    def _handle_define(self, rest: str, where: str) -> None:
-        m = re.match(r"([A-Za-z_]\w*)(\([^)]*\))?\s*(.*)$", rest)
-        if not m:
-            self.errors.append(f"{where}: malformed #define")
-            return
-        name, params, value = m.group(1), m.group(2), m.group(3).strip()
-        if params is not None:
-            # function-like macro: register for call checking, keep a stub value
-            self.func_macros.add(name)
-            self.defines[name] = "0"
-        else:
-            self.defines[name] = value if value else "1"
-
-    @staticmethod
-    def _strip_comments(text: str, in_block: bool) -> tuple[str, bool]:
-        out = []
-        i = 0
-        while i < len(text):
-            if in_block:
-                end = text.find("*/", i)
-                if end == -1:
-                    return "".join(out), True
-                i = end + 2
-                in_block = False
-                out.append(" ")
-                continue
-            if text.startswith("//", i):
-                break
-            if text.startswith("/*", i):
-                in_block = True
-                i += 2
-                continue
-            out.append(text[i])
-            i += 1
-        return "".join(out), in_block
-
-
-# ---------------------------------------------------------------------------
-# Analysis
-# ---------------------------------------------------------------------------
-
-@dataclass
-class Issue:
+class Diagnostic:
     severity: str
-    where: str
+    path: str
+    line: int
     message: str
 
-
-def analyse(program: Program, func_macros: set[str], structs: set[str]) -> list[Issue]:
-    issues: list[Issue] = []
-
-    # Build a source string with line mapping
-    text_lines = [line.text for line in program.lines]
-    text = "\n".join(text_lines)
-
-    # Balance
-    for open_ch, close_ch, name in (("{", "}", "brace"), ("(", ")", "paren"), ("[", "]", "bracket")):
-        depth = 0
-        open_line = 1
-        for idx, line in enumerate(text_lines, start=1):
-            for ch in line:
-                if ch == open_ch:
-                    depth += 1
-                    if depth == 1:
-                        open_line = idx
-                elif ch == close_ch:
-                    depth -= 1
-                    if depth < 0:
-                        loc = program.lines[idx - 1]
-                        issues.append(Issue("error", f"{loc.file}:{loc.lineno}",
-                                            f"unmatched '{close_ch}'"))
-                        depth = 0
-        if depth > 0:
-            loc = program.lines[open_line - 1]
-            issues.append(Issue("error", f"{loc.file}:{loc.lineno}",
-                                f"{depth} unclosed '{open_ch}'"))
-
-    # Declared functions. Overloads are legal in GLSL, so signatures (name +
-    # normalised parameter type list) are what we de-duplicate on.
-    decl_re = re.compile(
-        r"\b(?:void|float|int|uint|bool|vec[234]|ivec[234]|uvec[234]|bvec[234]"
-        r"|mat[234](?:x[234])?|MaterialData|[A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*\(([^;{}]*)\)\s*\{"
-    )
-    declared: dict[str, int] = {}
-    signatures: dict[str, int] = {}
-    arities: dict[str, set[int]] = {}
-    for m in decl_re.finditer(text):
-        name = m.group(1)
-        if name in KEYWORDS:
-            continue
-        declared[name] = declared.get(name, 0) + 1
-
-        params = m.group(2)
-        # strip parameter names, keep types: "in vec3 a, float b" -> "vec3,float"
-        types = []
-        for part in params.split(","):
-            part = part.strip()
-            if not part or part == "void":
-                continue
-            part = re.sub(r"^\s*(in|out|inout|const|highp|mediump|lowp)\s+", "", part)
-            tokens = part.split()
-            types.append(tokens[0] if tokens else "?")
-        signature = f"{name}({','.join(types)})"
-        signatures[signature] = signatures.get(signature, 0) + 1
-        arities.setdefault(name, set()).add(len(types))
-
-    for signature, count in signatures.items():
-        if count > 1:
-            issues.append(Issue("error", program.path, f"function defined {count} times: {signature}"))
-
-    known = set(declared) | BUILTIN_TYPES | BUILTIN_FUNCS | func_macros | structs | KEYWORDS
-
-    # Calls
-    call_re = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
-    reported: set[str] = set()
-    for idx, line in enumerate(text_lines, start=1):
-        for m in call_re.finditer(line):
-            name = m.group(1)
-            if name in known:
-                continue
-            if name in reported:
-                continue
-            # skip preprocessor lines
-            if line.lstrip().startswith("#"):
-                continue
-            reported.add(name)
-            loc = program.lines[idx - 1]
-            issues.append(Issue("error", f"{loc.file}:{loc.lineno}",
-                                f"call to undefined function '{name}'"))
-
-    # Argument counts for user defined functions (single line calls only)
-    for idx, line in enumerate(text_lines, start=1):
-        if line.lstrip().startswith("#"):
-            continue
-        for m in call_re.finditer(line):
-            name = m.group(1)
-            if name not in arities or name in KEYWORDS:
-                continue
-            depth = 1
-            i = m.end()
-            commas = 0
-            has_content = False
-            balanced = False
-            while i < len(line):
-                ch = line[i]
-                if ch == "(":
-                    depth += 1
-                elif ch == ")":
-                    depth -= 1
-                    if depth == 0:
-                        balanced = True
-                        break
-                elif ch == "," and depth == 1:
-                    commas += 1
-                elif not ch.isspace() and depth >= 1:
-                    has_content = True
-                i += 1
-            if not balanced:
-                continue
-            argc = 0 if not has_content else commas + 1
-            if argc not in arities[name]:
-                loc = program.lines[idx - 1] if idx - 1 < len(program.lines) else None
-                where = f"{loc.file}:{loc.lineno}" if loc else program.path
-                issues.append(Issue(
-                    "error", where,
-                    f"'{name}' called with {argc} argument(s), expected "
-                    + " or ".join(str(a) for a in sorted(arities[name]))
-                ))
-
-    # Version + targets
-    non_empty = [ln for ln in program.lines if ln.text.strip()]
-    if non_empty and not non_empty[0].text.strip().startswith("#version"):
-        issues.append(Issue("warning", program.path, "no #version directive on the first line"))
-
-    if program.path.endswith(".fsh"):
-        if "RENDERTARGETS" not in text:
-            issues.append(Issue("warning", program.path, "no RENDERTARGETS directive"))
-        if "void main" not in text and "voxy_emitFragment" not in text:
-            issues.append(Issue("error", program.path, "no main() entry point"))
-
-    if program.path.endswith(".vsh") and "void main" not in text:
-        issues.append(Issue("error", program.path, "no main() entry point"))
-
-    return issues
+    def __str__(self) -> str:
+        return f"{self.severity}: {self.path}:{self.line}: {self.message}"
 
 
-# ---------------------------------------------------------------------------
-# Optional checks against settings.glsl / shaders.properties
-# ---------------------------------------------------------------------------
+@dataclass
+class Preprocessor:
+    """A small C-style preprocessor sufficient for a shader pack."""
 
-def settings_options(root: str) -> tuple[dict[str, bool], dict[str, str]]:
-    path = os.path.join(root, "settings.glsl")
-    bools: dict[str, bool] = {}
-    numbers: dict[str, str] = {}
-    with open(path, "r", encoding="utf-8") as handle:
-        for raw in handle:
-            line = raw.strip()
-            m = re.match(r"#define\s+([A-Z_][A-Z0-9_]*)\s*(.*)$", line)
-            if m:
-                name, rest = m.group(1), m.group(2).strip()
-                if rest.startswith("("):
-                    continue
-                if rest == "":
-                    bools[name] = True
+    macros: dict[str, str] = field(default_factory=dict)
+    macro_params: dict[str, int] = field(default_factory=dict)
+    diagnostics: list[Diagnostic] = field(default_factory=list)
+    included: set[str] = field(default_factory=set)
+
+    def resolve_include(self, spec: str, current: Path) -> Path | None:
+        if spec.startswith("/"):
+            candidate = SHADERS / spec[1:]
+        else:
+            candidate = current.parent / spec
+        if candidate.exists():
+            return candidate
+        return None
+
+    def expand_object_macros(self, text: str, depth: int = 0) -> str:
+        if depth > 8:
+            return text
+
+        def replace(match: re.Match[str]) -> str:
+            name = match.group(0)
+            if name in self.macros:
+                return self.expand_object_macros(self.macros[name], depth + 1)
+            return name
+
+        return re.sub(r"\b[A-Z_][A-Z0-9_]*\b", replace, text)
+
+    def evaluate(self, expression: str) -> bool:
+        expr = expression.strip()
+
+        def defined_paren(match: re.Match[str]) -> str:
+            return "1" if match.group(1) in self.macros else "0"
+
+        def defined_plain(match: re.Match[str]) -> str:
+            return "1" if match.group(1) in self.macros else "0"
+
+        expr = re.sub(r"defined\s*\(\s*(\w+)\s*\)", defined_paren, expr)
+        expr = re.sub(r"defined\s+(\w+)", defined_plain, expr)
+        expr = self.expand_object_macros(expr)
+
+        def substitute_identifiers(match: re.Match[str]) -> str:
+            name = match.group(1)
+            if name in self.macro_params:
+                return name
+            return "1" if name in self.macros else "0"
+
+        expr = re.sub(r"\b([A-Za-z_]\w*)\b", substitute_identifiers, expr)
+        expr = expr.replace("&&", " and ").replace("||", " or ")
+        expr = re.sub(r"!(?!=)", " not ", expr)
+        if not expr.strip():
+            return True
+        try:
+            return bool(eval(expr, {"__builtins__": {}}, {}))  # noqa: S307
+        except Exception:
+            self.diagnostics.append(
+                Diagnostic("error", "shaders.properties", 0, f"cannot evaluate condition: {expression!r}")
+            )
+            return False
+
+    def process(self, path: Path, stack: list[str] | None = None) -> list[tuple[int, str]]:
+        stack = stack or []
+        key = str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path)
+        if key in stack:
+            chain = " -> ".join(stack + [key])
+            self.diagnostics.append(Diagnostic("error", key, 0, f"include cycle: {chain}"))
+            return []
+        if path not in self.included:
+            self.included.add(str(path))
+
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except OSError:
+            self.diagnostics.append(Diagnostic("error", key, 0, "cannot read file"))
+            return []
+
+        output: list[tuple[int, str]] = []
+        # (parent_active, this_branch_taken)
+        conditions: list[tuple[bool, bool]] = []
+        active = True
+
+        for number, line in enumerate(raw.splitlines(), start=1):
+            stripped = line.strip()
+
+            if stripped.startswith("#if"):
+                if stripped.startswith("#ifdef"):
+                    name = stripped[6:].strip()
+                    value = name in self.macros
+                elif stripped.startswith("#ifndef"):
+                    name = stripped[7:].strip()
+                    value = name not in self.macros
                 else:
-                    numbers[name] = rest
+                    value = self.evaluate(stripped[3:])
+                conditions.append((active, value))
+                active = active and value
                 continue
 
-            # Loader-recognised constants also become sliders
-            c = re.match(r"const\s+(?:int|float|bool)\s+([A-Za-z_]\w*)\s*=\s*([^;]+);", line)
-            if c:
-                numbers[c.group(1)] = c.group(2).strip()
-    return bools, numbers
+            if stripped.startswith("#elif"):
+                if not conditions:
+                    continue
+                parent, taken = conditions[-1]
+                value = (not taken) and self.evaluate(stripped[5:])
+                conditions[-1] = (parent, taken or value)
+                active = parent and value
+                continue
+
+            if stripped.startswith("#else"):
+                if not conditions:
+                    continue
+                parent, taken = conditions[-1]
+                conditions[-1] = (parent, True)
+                active = parent and not taken
+                continue
+
+            if stripped.startswith("#endif"):
+                if conditions:
+                    parent, _ = conditions.pop()
+                    active = parent
+                continue
+
+            if not active:
+                continue
+
+            if stripped.startswith("#include"):
+                match = re.match(r'#include\s+"([^"]+)"', stripped)
+                if not match:
+                    self.diagnostics.append(Diagnostic("error", key, number, "malformed #include"))
+                    continue
+                target = self.resolve_include(match.group(1), path)
+                if target is None:
+                    self.diagnostics.append(
+                        Diagnostic("error", key, number, f"missing include {match.group(1)!r}")
+                    )
+                    continue
+                output.extend(self.process(target, stack + [key]))
+                continue
+
+            if stripped.startswith("#define"):
+                body = stripped[7:].strip()
+                match = re.match(r"([A-Za-z_]\w*)(\(([^)]*)\))?\s*(.*)", body)
+                if match:
+                    name = match.group(1)
+                    params = match.group(3)
+                    value = match.group(4).strip()
+                    # Drop trailing option annotations such as "// [1 2 3]";
+                    # they are UI metadata, not part of the value.
+                    value = re.sub(r"//.*$", "", value).strip()
+                    value = re.sub(r"/\*.*?\*/", "", value).strip()
+                    if params is not None:
+                        self.macro_params[name] = len([p for p in params.split(",") if p.strip()])
+                        self.macros[name] = value
+                    else:
+                        self.macros[name] = value
+                continue
+
+            if stripped.startswith("#undef"):
+                name = stripped[6:].strip()
+                self.macros.pop(name, None)
+                continue
+
+            if stripped.startswith("#version") or stripped.startswith("#extension"):
+                output.append((number, line))
+                continue
+
+            output.append((number, line))
+
+        return output
 
 
-def check_properties(root: str, numbers: dict[str, str], bools: dict[str, bool]) -> list[Issue]:
-    issues: list[Issue] = []
-    path = os.path.join(root, "shaders.properties")
-    with open(path, "r", encoding="utf-8") as handle:
-        text = handle.read()
+# ------------------------------------------------------------------------------
+#  Source checks
+# ------------------------------------------------------------------------------
 
-    # every referenced option must exist
-    scan = []
-    for line in text.splitlines():
-        if line.lstrip().startswith("#"):
+FUNCTION_DEFINITION = re.compile(
+    r"^\s*(?:[A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*\((?:[^;{}]*)\)\s*\{?",
+    re.MULTILINE,
+)
+CALL_SITE = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
+
+
+def strip_comments(text: str) -> str:
+    """Blanks out comments while preserving offsets."""
+    out = list(text)
+    i = 0
+    while i < len(text):
+        if text.startswith("//", i):
+            j = text.find("\n", i)
+            j = len(text) if j == -1 else j
+            for k in range(i, j):
+                out[k] = " "
+            i = j
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            j = len(text) if j == -1 else j + 2
+            for k in range(i, min(j, len(text))):
+                if out[k] != "\n":
+                    out[k] = " "
+            i = j
+        else:
+            i += 1
+    return "".join(out)
+
+
+DECLARATION = re.compile(r"(?m)^[ \t]*(?:[A-Za-z_]\w*[ \t]+)+([A-Za-z_]\w*)[ \t]*\(")
+
+
+def check_source(path: Path, lines: list[tuple[int, str]], diags: list[Diagnostic], macros: Preprocessor) -> None:
+    rel = str(path.relative_to(ROOT))
+    text = "\n".join(line for _, line in lines)
+
+    # --- balance -----------------------------------------------------------
+    for opener, closer, label in (("{", "}", "braces"), ("(", ")", "parentheses"), ("[", "]", "brackets")):
+        if text.count(opener) != text.count(closer):
+            diags.append(
+                Diagnostic(
+                    "error",
+                    rel,
+                    0,
+                    f"unbalanced {label}: {text.count(opener)} {opener} vs {text.count(closer)} {closer}",
+                )
+            )
+
+    clean = strip_comments(text)
+    structs = set(re.findall(r"\bstruct\s+([A-Za-z_]\w*)", clean))
+
+    # --- declarations, with offsets ---------------------------------------
+    declared_at: dict[str, list[int]] = {}
+    for match in DECLARATION.finditer(clean):
+        name = match.group(1)
+        if name in GLSL_KEYWORDS:
             continue
-        scan.append(line.split("#", 1)[0])
-    scan_text = "\n".join(scan)
+        declared_at.setdefault(name, []).append(match.start())
 
-    for m in re.finditer(r"\b([A-Z][A-Z0-9_]{2,})\b", scan_text):
-        name = m.group(1)
-        if name in numbers or name in bools:
+    # --- calls must resolve against an earlier declaration -----------------
+    reported: set[str] = set()
+    for match in CALL_SITE.finditer(clean):
+        name = match.group(1)
+        if name in GLSL_KEYWORDS or name in GLSL_BUILTINS or name in structs or name in macros.macros:
             continue
-        if name in {"INFO", "SHADOW_PCF", "TAA", "FXAA", "CAS", "BLOOM", "DOF",
-                    "MOTION_BLUR", "POM", "RT", "VL", "SSR", "HDR", "VOXY",
-                    "DH", "TAAU", "IRIS", "SEPARATE_HARDWARE_SAMPLERS",
-                    "CUSTOM_IMAGES", "ENTITY_TRANSLUCENT", "RGBA16F", "RGBA16",
-                    "RGBA8", "RG16F", "RGB16F", "R32F", "RGB8", "RGBA32F",
-                    "R11F_G11F_B10F", "DH_BLEND_DEPTH", "VOXY_SUPPORT",
-                    "CLOUD_SHADOWMAP", "HDR_USE_FP16", "LDR", "ONE",
-                    "ONE_MINUS_SRC_ALPHA", "SRC_ALPHA", "ZERO", "OFF"}:
+        if name in reported:
             continue
-        issues.append(Issue("warning", "shaders.properties", f"unknown option name '{name}'"))
+        positions = declared_at.get(name)
+        if not positions:
+            diags.append(Diagnostic("error", rel, 0, f"call to undeclared function {name!r}"))
+            reported.add(name)
+        elif min(positions) > match.start():
+            diags.append(Diagnostic("error", rel, 0, f"function {name!r} used before its declaration"))
+            reported.add(name)
 
-    return issues
+    # --- duplicate definitions --------------------------------------------
+    signature_re = re.compile(r"(?m)^[ \t]*(?:[A-Za-z_]\w*[ \t]+)+([A-Za-z_]\w*)[ \t]*\(([^)]*)\)[ \t]*\{")
+    signatures: dict[str, int] = {}
+    for match in signature_re.finditer(clean):
+        name = match.group(1)
+        if name in GLSL_KEYWORDS:
+            continue
+        key = f"{name}({re.sub(r'[ \t]+', ' ', match.group(2)).strip()})"
+        signatures[key] = signatures.get(key, 0) + 1
+    for key, count in signatures.items():
+        if count > 1:
+            diags.append(Diagnostic("error", rel, 0, f"duplicate definition of {key}"))
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
+TYPE_NAMES = (
+    "float|int|uint|bool|double|void|"
+    "vec2|vec3|vec4|ivec2|ivec3|ivec4|uvec2|uvec3|uvec4|bvec2|bvec3|bvec4|"
+    "mat2|mat3|mat4|mat2x3|mat3x2|mat3x4|mat4x2|mat4x3|"
+    "sampler1D|sampler2D|sampler3D|samplerCube|"
+    "MuonFrame|MuonMaterial|MuonWave|MuonAO|MuonReflection|MuonVolumetric|"
+    "MuonCloudWeather|MuonCloudSample|MuonGISample|MuonSpecular|MuonFogSample|"
+    "MuonSunScreen"
+)
+DECLARED_NAME = re.compile(r"(?:" + TYPE_NAMES + r")\s+([A-Za-z_]\w*)")
+PACK_IDENTIFIER = re.compile(r"\b((?:muon|MUON)_[A-Za-z0-9_]+)\b")
+
+
+SAMPLER_USE = re.compile(r"\b(?:texture|textureLod|textureGrad|texelFetch|textureSize|textureOffset|textureProj)\s*\(\s*([A-Za-z_]\w*)")
+
+
+def _read_parens(text: str, start: int) -> tuple[str, int]:
+    """Returns the contents of the parenthesised group starting at `start`."""
+    depth = 0
+    index = start
+    while index < len(text):
+        char = text[index]
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return text[start + 1 : index], index
+        index += 1
+    return "", len(text)
+
+
+def _split_args(inner: str) -> list[str]:
+    if not inner.strip():
+        return []
+    parts: list[str] = []
+    depth = 0
+    current = []
+    for char in inner:
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+        if char == "," and depth == 0:
+            parts.append("".join(current))
+            current = []
+            continue
+        current.append(char)
+    parts.append("".join(current))
+    return [part for part in parts if part.strip()]
+
+
+def check_call_arity(path: Path, lines: list[tuple[int, str]], diags: list[Diagnostic], macros: Preprocessor) -> None:
+    """Validates the argument count of calls to functions defined in the pack.
+
+    Signature drift is the most common bug left behind by a refactor, and GLSL
+    reports it as a type error far from the cause.
+    """
+    rel = str(path.relative_to(ROOT))
+    text = "\n".join(line for _, line in lines)
+    clean = strip_comments(text)
+
+    arities: dict[str, set[int]] = {}
+    for match in DECLARATION.finditer(clean):
+        name = match.group(1)
+        if name in GLSL_KEYWORDS:
+            continue
+        open_paren = clean.find("(", match.end() - 1)
+        if open_paren == -1:
+            continue
+        inner, _ = _read_parens(clean, open_paren)
+        arities.setdefault(name, set()).add(len(_split_args(inner)))
+
+    structs = set(re.findall(r"\bstruct\s+([A-Za-z_]\w*)", clean))
+
+    reported: set[str] = set()
+    for match in CALL_SITE.finditer(clean):
+        name = match.group(1)
+        if name in GLSL_KEYWORDS or name in GLSL_BUILTINS or name in structs or name in macros.macros:
+            continue
+        if name not in arities:
+            continue
+        open_paren = match.end() - 1
+        inner, _ = _read_parens(clean, open_paren)
+        count = len(_split_args(inner))
+        if count not in arities[name]:
+            key = f"{name}/{count}"
+            if key in reported:
+                continue
+            reported.add(key)
+            diags.append(
+                Diagnostic(
+                    "error",
+                    rel,
+                    0,
+                    f"{name}() called with {count} argument(s), declared with {sorted(arities[name])}",
+                )
+            )
+
+
+def check_sampler_usage(path: Path, lines: list[tuple[int, str]], diags: list[Diagnostic]) -> None:
+    """Every sampler that is sampled must be declared in the program.
+
+    This exists because a declaration can go missing during a refactor without
+    any syntax error: the shader simply reads a default black texture.
+    """
+    rel = str(path.relative_to(ROOT))
+    text = "\n".join(line for _, line in lines)
+    clean = strip_comments(text)
+
+    declared = set(
+        re.findall(r"^\s*uniform\s+sampler\w*\s+([A-Za-z_]\w*)\s*;", clean, re.MULTILINE)
+    )
+    # Opaque types may also be function parameters (the GI tracer takes its
+    # radiance field as a sampler argument).
+    declared |= set(re.findall(r"sampler\w*\s+([A-Za-z_]\w*)\s*[,)]", clean))
+
+    reported: set[str] = set()
+    for match in SAMPLER_USE.finditer(clean):
+        name = match.group(1)
+        if name in declared or name in reported:
+            continue
+        reported.add(name)
+        diags.append(Diagnostic("error", rel, 0, f"sampler {name!r} is sampled but never declared"))
+
+
+def check_identifiers(path: Path, lines: list[tuple[int, str]], diags: list[Diagnostic], macros: Preprocessor) -> None:
+    """Every muon_/MUON_ identifier must be declared somewhere in the program.
+
+    A general scope analysis would need a GLSL front end; checking only the
+    pack's own prefix keeps the false-positive rate at zero while still catching
+    typos and symbols left behind by a refactor.
+    """
+    rel = str(path.relative_to(ROOT))
+    text = "\n".join(line for _, line in lines)
+    clean = strip_comments(text)
+
+    known: set[str] = set(macros.macros) | set(macros.macro_params)
+    known |= set(re.findall(r"\bstruct\s+([A-Za-z_]\w*)", clean))
+    known |= {match.group(1) for match in DECLARATION.finditer(clean)}
+    known |= {match.group(1) for match in DECLARED_NAME.finditer(clean)}
+
+    reported: set[str] = set()
+    for match in PACK_IDENTIFIER.finditer(clean):
+        name = match.group(1)
+        if name in known or name in reported:
+            continue
+        reported.add(name)
+        diags.append(Diagnostic("error", rel, 0, f"undeclared identifier {name!r}"))
+
+
+# Identifiers the loader injects itself. Declaring one of these is a duplicate
+# definition on the driver, so it is an error here.
+INJECTED_BY_LOADER = {
+    "dhMaterialId",  # Iris' Distant Horizons integration
+}
+
+
+def check_uniforms(path: Path, lines: list[tuple[int, str]], diags: list[Diagnostic]) -> None:
+    rel = str(path.relative_to(ROOT))
+    declared: dict[str, str] = {}
+    for _, line in lines:
+        match = re.match(r"^\s*uniform\s+(?:(?:lowp|mediump|highp)\s+)?(\w+)\s+(\w+)\s*(\[[^\]]*\])?\s*;", line)
+        if not match:
+            continue
+        type_name, name = match.group(1), match.group(2)
+        if name in INJECTED_BY_LOADER:
+            diags.append(
+                Diagnostic(
+                    "error",
+                    rel,
+                    0,
+                    f"uniform {name!r} is injected by the loader and must not be declared",
+                )
+            )
+            continue
+        if name in declared:
+            if declared[name] != type_name:
+                diags.append(
+                    Diagnostic(
+                        "error",
+                        rel,
+                        0,
+                        f"uniform {name!r} declared as {declared[name]} and {type_name}",
+                    )
+                )
+            else:
+                # Identical re-declaration is still rejected by NVIDIA's
+                # front end (C1038), so it is an error here too.
+                diags.append(
+                    Diagnostic("error", rel, 0, f"uniform {name!r} declared more than once")
+                )
+        declared[name] = type_name
+
+
+def check_outputs(path: Path, lines: list[tuple[int, str]], diags: list[Diagnostic]) -> None:
+    rel = str(path.relative_to(ROOT))
+    text = "\n".join(line for _, line in lines)
+
+    locations = [int(m) for m in re.findall(r"layout\s*\(\s*location\s*=\s*(\d+)\s*\)\s*out\s", text)]
+    target_match = re.search(r"RENDERTARGETS:\s*([0-9,\s]+)", text)
+
+    if locations and not target_match and not path.name.startswith("final"):
+        if "gbuffers_sky" not in path.name and "voxy" not in path.name:
+            diags.append(Diagnostic("error", rel, 0, "fragment stage writes outputs but has no RENDERTARGETS"))
+        return
+
+    if not target_match:
+        return
+
+    targets = [int(value) for value in re.findall(r"\d+", target_match.group(1))]
+    if len(targets) != len(locations):
+        diags.append(
+            Diagnostic(
+                "error",
+                rel,
+                0,
+                f"RENDERTARGETS lists {len(targets)} buffers but the stage declares {len(locations)} outputs",
+            )
+        )
+    for target in targets:
+        if target < 0 or target > 15:
+            diags.append(Diagnostic("error", rel, 0, f"RENDERTARGETS references colortex{target}, which does not exist"))
+
+
+# ------------------------------------------------------------------------------
+#  Stage pairing
+# ------------------------------------------------------------------------------
+
+def extract_interface(path: Path, pre: Preprocessor, direction: str) -> dict[str, tuple[str, str]]:
+    lines = pre.process(path)
+    result: dict[str, tuple[str, str]] = {}
+    for _, line in lines:
+        match = re.match(
+            r"^\s*(flat\s+)?(?:in|out)\s+(?:(?:lowp|mediump|highp)\s+)?(\w+)\s+(\w+)\s*;", line
+        )
+        if not match:
+            continue
+        qualifier = "flat" if match.group(1) else ""
+        prefix = line.strip().split()[0]
+        if (direction == "in" and prefix.startswith("in")) or (
+            direction == "out" and prefix.startswith("out")
+        ):
+            result[match.group(3)] = (match.group(2), qualifier)
+    return result
+
+
+# ------------------------------------------------------------------------------
+#  shaders.properties
+# ------------------------------------------------------------------------------
+
+def validate_properties(diags: list[Diagnostic]) -> None:
+    path = SHADERS / "shaders.properties"
+    if not path.exists():
+        diags.append(Diagnostic("error", "shaders/shaders.properties", 0, "missing"))
+        return
+
+    text = path.read_text(encoding="utf-8")
+    options = parse_settings_options()
+
+    profiles: list[str] = []
+    for match in re.finditer(r"^profile\.(\w+)\s*=\s*(.+)$", text, re.MULTILINE):
+        name, body = match.group(1), match.group(2)
+        if name == "comment" or name.endswith("comment"):
+            continue
+        profiles.append(name)
+        for token in body.split():
+            token = token.lstrip("!").split("=")[0]
+            if not token or token in {"true", "false"}:
+                continue
+            if token not in options and token not in {"shadowMapResolution", "shadowDistance", "sunPathRotation"}:
+                diags.append(Diagnostic("error", "shaders/shaders.properties", 0, f"profile {name}: unknown option {token}"))
+
+    expected = ["low", "medium", "high", "ultra", "raytraced", "rtgi", "ptgi"]
+    if profiles != expected:
+        diags.append(
+            Diagnostic(
+                "error",
+                "shaders/shaders.properties",
+                0,
+                f"profile order is {profiles}, expected {expected}",
+            )
+        )
+
+    # Every option referenced from a screen must exist.
+    screen_names: set[str] = set()
+    referenced: set[str] = set()
+    for match in re.finditer(r"^screen(?:\.(\w+))?\s*=\s*(.+)$", text, re.MULTILINE):
+        name = match.group(1)
+        if name:
+            screen_names.add(name)
+        body = match.group(2)
+        for token in body.split():
+            if token.startswith("[") or token.startswith("<"):
+                continue
+            if token.isupper() or re.fullmatch(r"[A-Z][A-Z0-9_]*", token):
+                referenced.add(token)
+
+    for name in sorted(screen_names):
+        if name not in {"columns"} and f"screen.{name}.columns" not in text:
+            # Subscreens referenced from a parent screen must exist.
+            if f"[{name}]" not in text:
+                diags.append(Diagnostic("warning", "shaders/shaders.properties", 0, f"screen {name!r} is never linked"))
+
+    for token in sorted(referenced):
+        if token not in options and token not in {"shadowMapResolution", "shadowDistance", "sunPathRotation"}:
+            diags.append(Diagnostic("error", "shaders/shaders.properties", 0, f"screen references unknown option {token}"))
+
+    slider_match = re.search(r"^sliders\s*=\s*(.+)$", text, re.MULTILINE)
+    if slider_match:
+        for token in slider_match.group(1).split():
+            if token not in options and token not in {"shadowMapResolution", "shadowDistance", "sunPathRotation"}:
+                diags.append(Diagnostic("error", "shaders/shaders.properties", 0, f"slider {token!r} is not an option"))
+
+    # Subscreens must be reachable from the root screen.
+    root = re.search(r"^screen\s*=\s*(.+)$", text, re.MULTILINE)
+    if root:
+        reachable = set(re.findall(r"\[(\w+)\]", root.group(1)))
+        changed = True
+        while changed:
+            changed = False
+            for name in list(reachable):
+                body = re.search(rf"^screen\.{name}\s*=\s*(.+)$", text, re.MULTILINE)
+                if body:
+                    for child in re.findall(r"\[(\w+)\]", body.group(1)):
+                        if child not in reachable:
+                            reachable.add(child)
+                            changed = True
+        for name in sorted(screen_names):
+            if name not in reachable and name != "columns":
+                diags.append(Diagnostic("warning", "shaders/shaders.properties", 0, f"subscreen {name!r} is unreachable"))
+
+    # Textures referenced by the properties must exist with the stated size.
+    for match in re.finditer(r"^texture\.[\w.]+(?:\s*=\s*)(\S+)(.*)$", text, re.MULTILINE):
+        relative = match.group(1)
+        if relative.startswith("minecraft:"):
+            continue
+        target = SHADERS / relative
+        if not target.exists():
+            diags.append(Diagnostic("error", "shaders/shaders.properties", 0, f"missing texture {relative}"))
+            continue
+        rest = match.group(2).split()
+        if rest and rest[0] == "TEXTURE_3D" and len(rest) >= 5:
+            try:
+                size = int(rest[2]) * int(rest[3]) * int(rest[4])
+            except ValueError:
+                continue
+            if target.stat().st_size != size:
+                diags.append(
+                    Diagnostic(
+                        "error",
+                        "shaders/shaders.properties",
+                        0,
+                        f"{relative}: expected {size} bytes for the declared dimensions, found {target.stat().st_size}",
+                    )
+                )
+
+
+def parse_settings_options() -> set[str]:
+    path = SHADERS / "settings.glsl"
+    options: set[str] = set()
+    for line in path.read_text(encoding="utf-8").splitlines():
+        match = re.match(r"^\s*(?://)?\s*#define\s+([A-Z][A-Z0-9_]*)", line)
+        if match:
+            options.add(match.group(1))
+        const = re.match(r"^\s*const\s+\w+\s+(\w+)\s*=", line)
+        if const:
+            options.add(const.group(1))
+    return options
+
+
+# ------------------------------------------------------------------------------
+#  Entry point
+# ------------------------------------------------------------------------------
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--root", default=".", help="repository root containing shaders/")
-    parser.add_argument("--dump", default=None, help="directory to write flattened programs to")
-    parser.add_argument("--json", default=None, help="write machine readable results here")
+    parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
-    root = os.path.abspath(os.path.join(args.root, SHADERS_DIR))
-    if not os.path.isdir(root):
-        print(f"error: {root} is not a directory", file=sys.stderr)
-        return 2
+    diags: list[Diagnostic] = []
+    programs = sorted(
+        [p for p in SHADERS.glob("*.vsh")] + [p for p in SHADERS.glob("*.fsh")]
+    )
 
-    programs: list[str] = []
-    for dirpath, _dirnames, filenames in os.walk(root):
-        for name in sorted(filenames):
-            if name.endswith((".vsh", ".fsh", ".csh", ".gsh")):
-                programs.append(os.path.join(dirpath, name))
-
-    programs.sort()
-
-    all_issues: list[Issue] = []
-    results = {}
+    if not programs:
+        diags.append(Diagnostic("error", "shaders/", 0, "no programs found"))
+        return 1
 
     for program in programs:
-        pre = Preprocessor(root)
-        parsed = pre.run(program)
-        all_issues.extend(Issue("error", os.path.relpath(program, root), e) for e in pre.errors)
+        pre = Preprocessor()
+        lines = pre.process(program)
+        diags.extend(pre.diagnostics)
+        pre.diagnostics.clear()
 
-        # Collect struct names from the flattened source
-        structs = set(re.findall(r"\bstruct\s+([A-Za-z_]\w*)", "\n".join(l.text for l in parsed.lines)))
+        check_source(program, lines, diags, pre)
+        check_uniforms(program, lines, diags)
+        check_identifiers(program, lines, diags, pre)
+        check_sampler_usage(program, lines, diags)
+        check_call_arity(program, lines, diags, pre)
+        if program.suffix == ".fsh":
+            check_outputs(program, lines, diags)
 
-        issues = analyse(parsed, pre.func_macros, structs)
-        all_issues.extend(issues)
-        results[os.path.relpath(program, root)] = {
-            "lines": len(parsed.lines),
-            "issues": [i.__dict__ for i in issues],
-        }
+        if args.verbose:
+            print(f"  checked {program.name} ({len(lines)} lines after preprocessing)")
 
-        if args.dump:
-            os.makedirs(args.dump, exist_ok=True)
-            out = os.path.join(args.dump, os.path.relpath(program, root).replace(os.sep, "__"))
-            with open(out, "w", encoding="utf-8") as handle:
-                handle.write("\n".join(l.text for l in parsed.lines))
+    # Stage pairing: every fragment input needs a vertex output.
+    for fsh in sorted(SHADERS.glob("*.fsh")):
+        vsh = fsh.with_suffix(".vsh")
+        if not vsh.exists():
+            diags.append(Diagnostic("error", fsh.name, 0, "no matching vertex shader"))
+            continue
+        pre_f = Preprocessor()
+        pre_v = Preprocessor()
+        fragment_inputs = extract_interface(fsh, pre_f, "in")
+        vertex_outputs = extract_interface(vsh, pre_v, "out")
+        for name, (type_name, qualifier) in fragment_inputs.items():
+            if name not in vertex_outputs:
+                diags.append(
+                    Diagnostic("error", fsh.name, 0, f"input {name!r} has no matching vertex output")
+                )
+            else:
+                other_type, other_qualifier = vertex_outputs[name]
+                if other_type != type_name:
+                    diags.append(
+                        Diagnostic("error", fsh.name, 0, f"input {name!r} is {type_name} but output is {other_type}")
+                    )
+                if qualifier != other_qualifier:
+                    diags.append(
+                        Diagnostic("error", fsh.name, 0, f"input {name!r} qualifier mismatch (flat)")
+                    )
 
-    # option cross checks
-    try:
-        bools, numbers = settings_options(root)
-        all_issues.extend(check_properties(root, numbers, bools))
+    validate_properties(diags)
 
-        # Keep the sliders line up to date
-        props_path = os.path.join(root, "shaders.properties")
-        with open(props_path, "r", encoding="utf-8") as handle:
-            props = handle.read()
-        sliders = " ".join(sorted(numbers.keys()))
-        new_props, count = re.subn(r"^sliders\s*=.*$", f"sliders = {sliders}", props, flags=re.MULTILINE)
-        if count == 0:
-            new_props = props.replace("sliders = PLACEHOLDER", f"sliders = {sliders}")
-            count = 1
-        if new_props != props:
-            with open(props_path, "w", encoding="utf-8") as handle:
-                handle.write(new_props)
-            print(f"updated sliders list ({len(numbers)} numeric options)")
-    except FileNotFoundError as exc:
-        all_issues.append(Issue("error", "settings.glsl", str(exc)))
+    # Placeholder scan
+    markers = ("TODO", "FIXME", "code goes here", "placeholder", "XXX:")
+    for path in list(SHADERS.rglob("*.glsl")) + list(SHADERS.rglob("*.vsh")) + list(SHADERS.rglob("*.fsh")):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for marker in markers:
+            if marker in text:
+                diags.append(Diagnostic("error", str(path.relative_to(ROOT)), 0, f"placeholder marker {marker!r}"))
 
-    errors = [i for i in all_issues if i.severity == "error"]
-    warnings = [i for i in all_issues if i.severity == "warning"]
+    errors = [d for d in diags if d.severity == "error"]
+    warnings = [d for d in diags if d.severity == "warning"]
 
-    for issue in errors + warnings:
-        print(f"{issue.severity.upper():7} {issue.where}: {issue.message}")
+    for diag in sorted(diags, key=lambda d: (d.path, d.line)):
+        print(diag)
 
-    total_lines = sum(r["lines"] for r in results.values())
-    print(f"\n{len(programs)} programs, {total_lines} flattened lines, "
-          f"{len(errors)} errors, {len(warnings)} warnings")
-
-    if args.json:
-        with open(args.json, "w", encoding="utf-8") as handle:
-            json.dump({"results": results,
-                       "errors": [i.__dict__ for i in errors],
-                       "warnings": [i.__dict__ for i in warnings]}, handle, indent=2)
-
+    print()
+    print(f"{len(programs)} programs, {len(errors)} errors, {len(warnings)} warnings")
     return 1 if errors else 0
 
 

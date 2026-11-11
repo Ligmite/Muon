@@ -1,13 +1,26 @@
-# Build outputs are attached to GitHub releases, not committed.
+# Build output (normally written beside the repository, but CI writes in-tree)
 release/
+dist/
+*.zip
 
-# Local tooling junk
-.dump/
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Editors
 .vscode/
 .idea/
+*.swp
+*~
 
 # OS
-Thumbs.db
 .DS_Store
+Thumbs.db
+desktop.ini
+
+# Local reference material (never committed: other people's packs)
+_ref/
+*.log

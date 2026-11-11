@@ -1,112 +1,102 @@
 # Changelog
 
-All notable changes to Muon are documented here.
-The format follows [Keep a Changelog](https://keepachangelog.com/), and the
-project uses the iteration scheme described in `docs/ITERATIONS.md`.
+All notable changes to Muon are recorded here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html) with a `0.x` series
+that is expected to break compatibility between minor releases.
 
-## [1.0.0] - "Ion"
+Every release is frozen into `archive/<version>/` beside the repository and is
+never modified afterwards. Build output goes to `release/`, which is never
+committed.
 
-First complete release.
+---
+
+## [0.0.1] — 2026-11-11
+
+First release. Not yet feature-complete against the long-term roadmap, but a
+complete, coherent renderer.
 
 ### Added
 
 **Pipeline**
-- Deferred renderer with 17 passes: shadow, gbuffers, 5 deferred passes,
-  7 composite passes, final.
-- Explicit `RENDERTARGETS` / `layout(location)` outputs on every pass, so the
-  pack is portable to non-GL backends.
-- Half-resolution AO, volumetric and cloud buffers with depth-aware upsampling.
-- Persistent history buffers for TAA and the path tracer.
+
+- Deferred renderer with a single surface-lighting implementation
+  (`lib/common/surface.glsl`) shared by opaque geometry, glass and water.
+- Sixteen-colour-target g-buffer layout, documented in `docs/buffers.md`.
+- Separate translucent g-buffer so the deferred stage can light the surface
+  behind water before the water pass refracts it.
+- `MuonFrame` runtime state block: one std140-shaped struct, shared definition
+  for the Iris adapter path and the future native UBO path.
+- `lib/uniforms/settings.glsl`: compile-time options exposed as `const` values,
+  the specialisation-constant analogue for a SPIR-V backend.
+
+**Atmosphere**
+
+- Rayleigh + Mie + ozone single-scattering atmosphere with sunset extinction.
+- Fast analytic sky-ambient path for surface lighting.
+- Volumetric fog with per-sample shadow-map occlusion and rain/cave density.
+- Screen-space god rays with depth-based occlusion.
+- Multi-layer volumetric clouds (cumulus + cirrus) from a baked Perlin-Worley
+  volume with Worley erosion and six-step self-shadowing.
+- Weather coupling of cloud coverage, thickness, density and wind.
+- Cloud shadows projected from the same density field.
 
 **Lighting**
-- Physically based shading: GGX specular with height-correlated Smith
-  visibility, multi-scatter energy compensation, split-sum environment BRDF.
-- labPBR resource pack support (smoothness, F0 with conductor heuristic,
-  emission, porosity/SSS), plus a legacy specular mode and a no-pack mode with
-  hand-tuned vanilla materials.
-- Normal mapping, and parallax occlusion mapping with self-shadowing and
-  distance fade.
-- PCSS soft shadows with blocker search, rotated Poisson PCF, normal-offset
-  bias and a distortion that concentrates shadow resolution near the player.
-- Screen-space contact shadows.
-- Cloud shadows on terrain.
-- GTAO (horizon based) and SSAO, with an ambient-only occlusion option.
-- Subsurface scattering for foliage, flowers, cloth and snow; cloth sheen.
-- Rain puddles and general wet-surface darkening driven by `wetness`.
-- Handheld light.
 
-**Sky and atmosphere**
-- Rayleigh + Mie + ozone single-scattering atmosphere with multiple-scattering
-  approximation.
-- Sun disc with limb darkening; moon disc with eight phases and procedural
-  craters.
-- Stars with twinkle, Milky Way, aurora curtains, rainbows.
-- Weather blending (overcast, desaturation, rain dimming).
-- Separate Nether and End skies.
+- Two-tier cascaded shadowing: hardware PCSS cascade plus a screen-space
+  ray-marched cascade for distance coverage.
+- GTAO with bent-normal output, and SSAO as a cheaper alternative.
+- Subsurface scattering for foliage: analytic transmission plus a screen-space
+  gather.
+- Cloud shadowing, block-light falloff and a bounce-light approximation.
 
-**Clouds**
-- Four independent volumetric layers: cumulus, cumulus congestus,
-  altocumulus, cirrus.
-- Beer-Lambert + powder + three-octave multiple scattering lighting with
-  configurable light steps.
-- Shared coverage field driven by weather; wind direction and speed.
-- Optional classic flat cloud layer.
+**Surfaces**
 
-**Volumetrics**
-- Half-resolution raymarched fog with exponential height falloff, rain
-  multiplier, cave fog and a border term.
-- Shadow-map light shafts with dithered visibility and HG phase.
-- Underwater medium switch.
+- LabPBR 1.3 decode: F0, perceptual smoothness, porosity, emissive, SSS flag.
+- Parallax occlusion mapping with binary refinement and self-shadowing.
+- Screen-space reflections with roughness jitter, hit refinement, thickness
+  rejection and edge fade.
+- Weather-driven wetness, puddles with animated ripple normals, and snow cover.
 
 **Water**
-- Analytic wave normals and matching vertex displacement.
-- Rain ripples, refraction, Beer-Lambert absorption, scattering, caustics,
-  edge foam, SSR and sun specular.
-- Underwater absorption for the camera.
 
-**Ray tracing**
-- Screen-space path tracer with three modes (reflections, reflections + GI,
-  full path tracing).
-- Next-event estimation to the sun with soft shadow cone, cosine/GGX lobe
-  selection, Russian roulette.
-- Temporal accumulation with motion vectors and disocclusion rejection.
-- Edge-stopping bilateral denoiser.
+- Gerstner vertex displacement with a higher-frequency analytic normal.
+- Snell's-law refraction with a depth-aware offset clamp.
+- Beer-Lambert extinction and scattering.
+- Animated caustics with depth fading.
+- Fresnel-weighted sky and screen-space reflections.
 
-**Post processing**
-- TAA with Catmull-Rom history and neighbourhood clipping.
-- FXAA and contrast-adaptive sharpening.
-- 13-tap bloom with soft knee.
-- Depth of field with foreground rejection; motion blur.
-- Auto exposure from a fixed luminance grid, or manual.
-- Five tonemappers, with Muon Filmic as the default.
-- Warm vibrant grade: white balance, contrast, vibrance, hue-selective
-  orange/teal/green boosts, split toning, clarity, black level, Purkinje shift.
-- Vignette, chromatic aberration, film grain.
+**Post**
 
-**Output**
-- Fully linear Rec.709 working space with a single display transform.
-- Native HDR output through rrtt217's HDR mod.
+- TAA with reprojected velocity buffers and YCoCg variance clipping.
+- AgX, ACES and Reinhard tonemapping in linear colour.
+- Dynamic exposure with separate brighten/darken time constants.
+- Mip-pyramid bloom with a soft-knee bright pass.
+- Thin-lens depth of field with autofocus.
+- Depth-tested lens flare with ghosts and a halo.
+- Grading, vignette, CAS-style sharpening, film grain, dithering.
+- FXAA as an alternative to TAA.
 
-**Compatibility**
-- Distant Horizons: `dh_terrain`, `dh_water`, `dh_generic`, combined depth,
-  LoD position reconstruction everywhere it matters.
-- Voxy: `voxy_opaque.glsl`, `voxy_translucent.glsl`, `voxy.json`
-  (experimental).
-- Designed for Vitrail's Vulkan backend (no compute, no image load/store,
-  explicit render targets).
+**Mod integration**
+
+- Distant Horizons `dh_terrain` / `dh_water` programs.
+- Voxy `voxy.json`, `voxy_opaque.glsl`, `voxy_translucent.glsl`.
 
 **Tooling**
-- `tools/validate.py`: preprocessor, include resolution, undefined-function and
-  argument-count checks, delimiter balance, entry-point checks, settings and
-  translation consistency.
-- `tools/gen_programs.py`, `tools/gen_lang.py`, `tools/generate_noise.py`.
-- `tools/build.py`: release zip plus per-iteration archive with a manifest.
-- GitHub Actions workflow that validates and builds on tag.
 
-### Known issues
-- In-game visual validation is still pending for this build.
-- OptiFine is unsupported (history buffers and per-program blending need Iris).
-- No coloured voxel lighting yet.
-- DH/Voxy LoD geometry does not cast shadows.
+- `tools/validate.py`: static pack validator (includes, preprocessing, ordering,
+  stage pairing, uniform conflicts, RENDERTARGETS, options, presets, textures).
+- `tools/gen_wrappers.py`: generates all 92 program entry points from a manifest.
+- `tools/gen_noise.py`: generates the 2D noise texture and both 3D noise volumes.
+- `tools/package.py`, `build.ps1`, `build.sh`: reproducible release packaging.
 
-[1.0.0]: https://github.com/example/muon/releases/tag/v1.0.0
+### Known limitations
+
+- RTGI/PTGI are **screen-space** path tracing. Off-screen geometry is replaced by
+  the analytic sky; there is no world-space voxel tracer yet.
+- Iris exposes one hardware shadow map per frame, so the second shadow cascade is
+  screen-space rather than a second hardware cascade.
+- Translucent surfaces are single-layer: only the nearest translucent fragment
+  per pixel is stored.
+- Hardware-ray-tracing hooks and HDR display output are roadmap items, not
+  present in this version.
