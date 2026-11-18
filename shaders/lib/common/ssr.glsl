@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - lib/common/ssr.glsl
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -77,7 +77,8 @@ MuonReflection muon_trace_reflection(
     vec3 view_dir,
     vec3 view_normal,
     float roughness,
-    float dither
+    float dither,
+    sampler2D source
 ) {
     MuonReflection result = muon_reflection_empty();
 
@@ -118,7 +119,7 @@ MuonReflection muon_trace_reflection(
             break;
         }
 
-        float scene_depth = muon_linear_depth(texture(depthtex0, sample_uv).r);
+        float scene_depth = muon_linear_depth(texture(depthtex1, sample_uv).r);
         float thickness = max(step_size * 1.8, 0.05);
 
         if (scene_depth > 0.0 && ray_depth > scene_depth && ray_depth < scene_depth + thickness) {
@@ -133,7 +134,7 @@ MuonReflection muon_trace_reflection(
                 if (!muon_project_view(mid_point, mid_uv, mid_depth)) {
                     break;
                 }
-                float mid_scene = muon_linear_depth(texture(depthtex0, mid_uv).r);
+                float mid_scene = muon_linear_depth(texture(depthtex1, mid_uv).r);
                 if (mid_depth > mid_scene) {
                     high = mid;
                 } else {
@@ -146,9 +147,9 @@ MuonReflection muon_trace_reflection(
             float hit_depth;
             if (muon_project_view(hit_point, hit_uv, hit_depth)) {
                 /* Reject hits that would sample across a depth discontinuity. */
-                float verify = muon_linear_depth(texture(depthtex0, hit_uv).r);
+                float verify = muon_linear_depth(texture(depthtex1, hit_uv).r);
                 if (abs(verify - hit_depth) < thickness * 2.5) {
-                    result.color = texture(colortex0, hit_uv).rgb;
+                    result.color = texture(source, hit_uv).rgb;
                     result.hit = 1.0;
                     result.distance = high;
 

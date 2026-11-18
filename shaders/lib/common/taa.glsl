@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - lib/common/taa.glsl
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -43,9 +43,30 @@
  * consecutive frames across the pixel footprint evenly, so a static camera
  * converges within a handful of frames.
  */
+/* Jitter in UV units (half a pixel peak to peak). */
+vec2 muon_taa_jitter_uv(uint frame) {
+    vec2 sequence = muon_r2_sequence(frame);
+    return (sequence - 0.5) * muonFrame.viewport.zw;
+}
+
 vec2 muon_taa_jitter_ndc() {
-    vec2 sequence = muon_r2_sequence(uint(muonFrame.time.x));
-    return (sequence - 0.5) * 2.0 * muonFrame.viewport.zw;
+#if defined TAA_JITTER
+    return muon_taa_jitter_uv(uint(muonFrame.time.x)) * 2.0;
+#else
+    /* Off by default: a jitter that the resolve cannot average away is not
+       anti-aliasing, it is a visible camera shake. */
+    return vec2(0.0);
+#endif
+}
+
+/*
+ * How far the sample point moved between two frames purely because the jitter
+ * changed. The resolve subtracts this so that history and current sample are
+ * compared at the same sub-pixel offset.
+ */
+vec2 muon_taa_jitter_delta_uv() {
+    uint frame = uint(muonFrame.time.x);
+    return muon_taa_jitter_uv(frame) - muon_taa_jitter_uv(frame - 1u);
 }
 
 vec2 muon_taa_jitter_pixels() {
@@ -64,8 +85,15 @@ vec2 muon_taa_jitter_pixels() {
 vec2 muon_velocity(vec2 uv, vec3 view_pos) {
     vec3 world_pos = muon_view_to_world_pos(view_pos);
 
+    /* viewInverse yields a camera-relative position, so the point has to be
+       re-expressed relative to where the previous camera was before the
+       previous matrices can be applied. Without this the reprojection is only
+       correct while the player stands still. */
+    vec3 camera_delta = muon_camera_position() - muon_previous_camera_position();
+    vec3 previous_world_pos = world_pos + camera_delta;
+
     vec4 clip_current = muonFrame.projection * vec4(view_pos, 1.0);
-    vec4 clip_previous = muonFrame.previousProjection * (muonFrame.previousView * vec4(world_pos, 1.0));
+    vec4 clip_previous = muonFrame.previousProjection * (muonFrame.previousView * vec4(previous_world_pos, 1.0));
 
     if (abs(clip_current.w) < 1.0e-5 || abs(clip_previous.w) < 1.0e-5) {
         return vec2(0.0);

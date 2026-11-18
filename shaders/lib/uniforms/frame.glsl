@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - lib/uniforms/frame.glsl
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -348,9 +348,21 @@ MuonFrame muon_frame_build() {
         ? normalize(moonPosition)
         : vec3(0.0, -1.0, 0.0);
 
-    vec3 sunWorld = normalize(muon_view_to_world_dir(sunView));
-    vec3 moonWorld = normalize(muon_view_to_world_dir(moonView));
-    vec3 upWorld = normalize(muon_view_to_world_dir(upPosition));
+    /*
+     * These conversions must use the local `f`, not the muon_view_to_world_dir()
+     * helper: that helper reads the global muonFrame, which is still being
+     * constructed here. Using it made sunDirection come out as a zero vector,
+     * which silently zeroed the sun transmittance and with it the sky, the
+     * direct light and every reflection.
+     */
+    vec3 sunWorld = (f.viewInverse * vec4(sunView, 0.0)).xyz;
+    vec3 moonWorld = (f.viewInverse * vec4(moonView, 0.0)).xyz;
+    vec3 upWorld = (f.viewInverse * vec4(upPosition, 0.0)).xyz;
+
+    /* A degenerate result must never propagate: fall back to world up. */
+    sunWorld = length(sunWorld) > 1.0e-5 ? normalize(sunWorld) : vec3(0.0, 1.0, 0.0);
+    moonWorld = length(moonWorld) > 1.0e-5 ? normalize(moonWorld) : vec3(0.0, -1.0, 0.0);
+    upWorld = length(upWorld) > 1.0e-5 ? normalize(upWorld) : vec3(0.0, 1.0, 0.0);
 
     bool sunlit = sunAngle < 0.5;
     vec3 lightWorld = sunlit ? sunWorld : moonWorld;

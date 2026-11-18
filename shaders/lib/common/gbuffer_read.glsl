@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - lib/common/gbuffer_read.glsl
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -139,15 +139,16 @@ float muon_read_translucent_linear_depth(vec2 uv) {
  * independent of the projection's precision.
  */
 bool muon_pixel_has_translucent(vec2 uv, float opaque_depth, float translucent_depth) {
-    if (translucent_depth >= 1.0) {
-        return false;
-    }
-    if (opaque_depth >= 1.0) {
-        return translucent_depth < 1.0;
-    }
-    float opaque_linear = muon_linear_depth(opaque_depth);
-    float translucent_linear = muon_linear_depth(translucent_depth);
-    return translucent_linear < opaque_linear - 0.002;
+    /* Primary signal: the opacity written into the translucent surface target.
+       Opaque geometry clears it, translucent geometry sets it, so it is always
+       current for the frame. The depth comparison is only a cross-check, because
+       Minecraft's translucent layer does not write depth at all and the two
+       depth buffers can therefore be identical at a water surface. */
+    /* No depth test. Both the sky pass and the opaque pass write zero here, so
+       the marker is current for every pixel regardless of depth - and a depth
+       test would reject deep water, where the opaque depth is the far plane. */
+    float opacity = texture(colortex11, uv).g;
+    return opacity > 0.004;
 }
 
 #endif // MUON_COMMON_GBUFFER_READ_GLSL

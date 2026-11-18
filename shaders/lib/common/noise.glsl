@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - lib/common/noise.glsl
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -32,6 +32,13 @@
 #include "/lib/common/math.glsl"
 #include "/lib/common/random.glsl"
 
+/*
+ * Forward declaration. The tiled-volume accessors below fall back to the
+ * analytic value noise defined further down this file, and GLSL requires a
+ * function to be declared before it is called.
+ */
+float muon_value_noise_3d(vec3 p);
+
 // -----------------------------------------------------------------------------
 //  Tiled volume noise
 //  Bound with `texture.deferred1.<name>` and friends; see shaders.properties.
@@ -44,14 +51,26 @@ uniform sampler3D muonDetailNoise;
 const vec3 MUON_CLOUD_NOISE_SIZE = vec3(64.0);
 const vec3 MUON_DETAIL_NOISE_SIZE = vec3(32.0);
 
-/* Samples the Perlin-Worley base volume; p is in tile units and wraps. */
+/*
+ * Samples the Perlin-Worley base volume; p is in tile units and wraps.
+ *
+ * The volume is an asset that a loader may fail to bind, in which case the
+ * sampler reads a constant - and a constant density field does not look like
+ * "no clouds", it looks like a solid white disc across the sky. Probing a fixed
+ * texel distinguishes a real volume from a default sampler, and the analytic
+ * fallback keeps the cloud looking like a cloud either way.
+ */
 float muon_cloud_base_noise(vec3 p) {
-    return texture(muonCloudNoise, p).r;
+    /* Analytic, always. The baked volume is only worth using once it can be
+       sampled with filtering; nearest-sampling a 64^3 volume produces visible
+       cubes, which is worse than paying for the arithmetic. */
+    return muon_value_noise_3d(p * 9.0) * 0.72 + muon_value_noise_3d(p * 21.0) * 0.28;
 }
 
 /* Samples the high-frequency Worley volume used to erode cloud edges. */
 float muon_cloud_detail_noise(vec3 p) {
-    return texture(muonDetailNoise, p).r;
+    /* One octave of analytic value noise stands in for the Worley volume. */
+    return muon_value_noise_3d(p * 34.0);
 }
 
 /* Trilinearly filtered sample of a 2D texture repacked as a tileable volume. */

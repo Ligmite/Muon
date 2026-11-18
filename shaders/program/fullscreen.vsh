@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - program/fullscreen.vsh
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -24,6 +24,12 @@
 out vec2 texcoord;
 
 void main() {
+    /* Every entry point initialises MuonFrame, including this one. A vertex
+       stage that never reads the block is harmless, but a missing initialiser
+       in a stage that does read it fails silently, so the invariant is kept
+       unconditional. */
+    MUON_FRAME_INIT();
+
     texcoord = gl_MultiTexCoord0.xy;
     gl_Position = vec4(gl_Vertex.xy * 2.0 - 1.0, 0.0, 1.0);
 }

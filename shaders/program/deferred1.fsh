@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - program/deferred1.fsh
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -56,7 +56,7 @@ vec3 muon_sun_disc(vec3 world_dir) {
     float normalized = angle / radius;
     /* Limb darkening: the centre of the disc is hotter than its edge. */
     float limb = sqrt(max(1.0 - normalized * normalized, 0.0));
-    return MUON_SUN_TINT * (muon_sun_color() * (limb * 8.0 + 2.0));
+    return MUON_SUN_TINT * (muon_sun_color() * (limb * 3.0 + 0.75));
 #endif
 }
 
@@ -153,7 +153,7 @@ void main() {
     MUON_FRAME_INIT();
 
     vec2 uv = texcoord;
-    float depth = texture(depthtex0, uv).r;
+    float depth = texture(depthtex1, uv).r;
 
     if (depth >= 1.0) {
         vec3 view_ray = muon_view_pos_from_depth(uv, 1.0);

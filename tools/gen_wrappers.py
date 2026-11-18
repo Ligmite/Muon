@@ -30,7 +30,7 @@ HEADER = """/*
 ================================================================================
 
   Muon Shaders - {name}.{ext}
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -97,6 +97,7 @@ PROGRAMS: dict[str, tuple[str, str, list[str]]] = {
     "composite4": ("fullscreen.vsh", "composite4.fsh", []),
     "composite5": ("fullscreen.vsh", "composite5.fsh", []),
     "composite6": ("fullscreen.vsh", "composite6.fsh", []),
+    "composite7": ("fullscreen.vsh", "composite7.fsh", []),
     "final": ("fullscreen.vsh", "final.fsh", []),
     # --- Distant Horizons --------------------------------------------------
     "dh_terrain": ("dh_terrain.vsh", "dh_terrain.fsh", []),

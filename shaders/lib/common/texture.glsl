@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - lib/common/texture.glsl
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -140,12 +140,19 @@ MuonSpecular muon_decode_specular(vec2 uv) {
  * luminance otherwise. Resource packs that ship a proper height map get sharper
  * depth; packs that do not still get a plausible surface.
  */
-float muon_height_sample(vec2 uv, float albedo_luminance) {
-    vec4 normal_texel = texture(normals, uv);
-    if (normal_texel.a > 0.004 && normal_texel.a < 0.996) {
-        return normal_texel.a;
-    }
-    return albedo_luminance;
+float muon_height_sample(vec2 uv) {
+    return texture(normals, uv).a;
+}
+
+/*
+ * True when the resource pack actually supplies a height channel. LabPBR does
+ * not require one, and parallax without a height field is worse than no
+ * parallax at all: a constant field shifts every surface by the same amount,
+ * and inventing one from the albedo turns vanilla textures into speckles.
+ */
+bool muon_has_height(vec2 uv) {
+    float height = texture(normals, uv).a;
+    return height > 0.004 && height < 0.996;
 }
 
 /*
@@ -155,7 +162,6 @@ float muon_height_sample(vec2 uv, float albedo_luminance) {
 vec2 muon_parallax_offset(
     vec2 uv,
     vec3 view_dir_tangent,
-    float albedo_luminance,
     float depth_scale,
     out float height
 ) {
@@ -177,7 +183,7 @@ vec2 muon_parallax_offset(
     for (int i = 0; i < MUON_POM_SAMPLES; i++) {
         current_depth -= layer_step;
         current_uv = uv - direction * (current_depth * scale);
-        float sampled = muon_height_sample(current_uv, albedo_luminance);
+        float sampled = muon_height_sample(current_uv);
         if (sampled >= current_depth) {
             break;
         }
@@ -190,7 +196,7 @@ vec2 muon_parallax_offset(
     for (int i = 0; i < MUON_POM_REFINE_STEPS; i++) {
         float mid = 0.5 * (previous_uv_depth + current_depth);
         vec2 mid_uv = uv - direction * (mid * scale);
-        float sampled = muon_height_sample(mid_uv, albedo_luminance);
+        float sampled = muon_height_sample(mid_uv);
         if (sampled >= mid) {
             current_depth = mid;
             current_uv = mid_uv;
@@ -208,7 +214,7 @@ vec2 muon_parallax_offset(
  * Self-shadowing inside the depth range the parallax march covered. A height
  * sample that rises above the ray towards the light occludes the fragment.
  */
-float muon_parallax_shadow(vec2 uv, vec3 light_dir_tangent, float albedo_luminance, float depth_scale, float height) {
+float muon_parallax_shadow(vec2 uv, vec3 light_dir_tangent, float depth_scale, float height) {
 #if !defined PARALLAX || !defined POM_SELF_SHADOW
     return 1.0;
 #else
@@ -223,7 +229,7 @@ float muon_parallax_shadow(vec2 uv, vec3 light_dir_tangent, float albedo_luminan
             break;
         }
         vec2 sample_uv = uv + direction * (sample_height * scale);
-        float sampled = muon_height_sample(sample_uv, albedo_luminance);
+        float sampled = muon_height_sample(sample_uv);
         if (sampled > sample_height + 0.002) {
             occlusion += 1.0;
         }

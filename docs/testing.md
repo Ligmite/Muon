@@ -22,7 +22,7 @@ A second instance (`vulkanshadersbigglobegpuacceleratedchunkbuildingtest`) carri
 
 ## Procedure
 
-1. `./build.ps1` (or `build.sh`) to produce `release/Muon-v0.0.1.zip` beside the
+1. `./build.ps1` (or `build.sh`) to produce `release/Muon-v0.1.2.zip` beside the
    repository (use `-Archive` / `--archive` to freeze a copy into `archive/`).
 2. Copy it into the instance's `shaderpacks/` directory.
 3. Launch, select **Muon** in *Options → Video Settings → Shader Packs*.

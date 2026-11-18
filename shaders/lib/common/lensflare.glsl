@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - lib/common/lensflare.glsl
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -65,7 +65,7 @@ MuonSunScreen muon_sun_screen_position() {
 
     /* Only light that actually reaches the eye can flare. */
     vec2 clamped_uv = clamp(uv, vec2(0.0), vec2(1.0));
-    float center_depth = texture(depthtex0, clamped_uv).r;
+    float center_depth = texture(depthtex1, clamped_uv).r;
 
     result.uv = uv;
     result.visible = center_depth >= 1.0 ? 1.0 : 0.0;
@@ -75,6 +75,10 @@ MuonSunScreen muon_sun_screen_position() {
        not produce a full-strength ghost train. */
     result.visible *= muon_smoothstep(-0.02, 0.12, light_dir.y);
     result.visible *= 1.0 - muon_rain_strength() * 0.6;
+
+    /* Flares belong to a camera pointed at the sun. Fading with screen-centre
+       distance means a sun that is merely on screen does not flood the frame. */
+    result.visible *= muon_smoothstep(0.85, 0.30, length(uv - vec2(0.5)));
 
     return result;
 }
@@ -132,17 +136,20 @@ vec3 muon_sun_glow(MuonSunScreen sun, vec3 sun_color) {
     vec2 delta = (uv - sun.uv) * vec2(muon_aspect_ratio(), 1.0);
     float distance = length(delta);
 
-    float core = exp(-distance * 22.0);
-    float bloom = exp(-distance * 3.2) * 0.35;
+    /* Tight core and a small halo. The previous falloff was so broad that it
+       added several units of radiance across the entire frame, which read as
+       glare even when the sun was nowhere near the crosshair. */
+    float core = exp(-distance * 90.0);
+    float halo = exp(-distance * 12.0) * 0.05;
 
-    return sun_color * ((core + bloom) * sun.visible);
+    return sun_color * ((core + halo) * sun.visible);
 }
 
 vec3 muon_apply_lens_flare(vec3 color, MuonSunScreen sun, vec3 sun_color) {
 #if !defined LENS_FLARE
     return color;
 #else
-    vec3 flare = (muon_lens_ghosts(sun) * 3.0 + muon_sun_glow(sun, sun_color)) * LENS_FLARE_STRENGTH;
+    vec3 flare = (muon_lens_ghosts(sun) * 1.1 + muon_sun_glow(sun, sun_color)) * LENS_FLARE_STRENGTH;
     return color + flare;
 #endif
 }

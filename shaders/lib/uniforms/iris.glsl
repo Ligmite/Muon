@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - lib/uniforms/iris.glsl
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -130,6 +130,9 @@ uniform sampler2D normals;
 uniform sampler2D specular;
 uniform sampler2D noisetex;
 
+// depthtex0 = all geometry (translucents included)
+// depthtex1 = opaque geometry only
+// depthtex2 = opaque geometry, hand excluded
 uniform sampler2D depthtex0;
 uniform sampler2D depthtex1;
 uniform sampler2D depthtex2;

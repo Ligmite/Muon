@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - program/composite1.fsh
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -82,13 +82,17 @@ void main() {
 
     /* --- specular reflection ------------------------------------------- */
 
-    if (muon_luminance(fresnel) > 0.005) {
+    /* Gate on roughness as well as on Fresnel energy: a rough surface has no
+       business sampling a sharp screen-space reflection, and doing so produced
+       bright streaks across grass. */
+    if (muon_luminance(fresnel) > 0.01 && material.roughness < 0.55) {
         MuonReflection reflection = muon_trace_reflection(
             view_pos,
             view_dir,
             view_normal,
             material.roughness,
-            dither
+            dither,
+            colortex15
         );
 
         vec3 world_reflect = normalize(muon_view_to_world_dir(muon_reflect(view_dir, view_normal)));
@@ -101,7 +105,8 @@ void main() {
             material.roughness
         );
 
-        float weight = muon_saturate(muon_luminance(fresnel) * MUON_SSR_STRENGTH);
+        float roughness_fade = 1.0 - muon_saturate(material.roughness / 0.55);
+        float weight = muon_saturate(muon_luminance(fresnel) * MUON_SSR_STRENGTH * roughness_fade);
         out_reflection = vec4(reflected * weight, weight);
     }
 
@@ -113,7 +118,7 @@ void main() {
         view_pos,
         view_normal,
         material.normal,
-        colortex0,
+        colortex15,
         0,
         dither
     );

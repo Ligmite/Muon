@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - program/dh_terrain.fsh
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).

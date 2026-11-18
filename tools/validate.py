@@ -283,7 +283,36 @@ def strip_comments(text: str) -> str:
     return "".join(out)
 
 
+# A declaration starts with a type, so the first token is checked against the
+# known type names. Without that, `return foo(...)` parses as a declaration of
+# foo and the "used before declaration" check silently passes.
+GLSL_TYPE_NAMES = {
+    "void", "float", "int", "uint", "bool", "double",
+    "vec2", "vec3", "vec4", "ivec2", "ivec3", "ivec4", "uvec2", "uvec3", "uvec4",
+    "bvec2", "bvec3", "bvec4", "mat2", "mat3", "mat4",
+    "mat2x2", "mat2x3", "mat2x4", "mat3x2", "mat3x3", "mat3x4",
+    "mat4x2", "mat4x3", "mat4x4",
+    "sampler1D", "sampler2D", "sampler3D", "samplerCube", "sampler2DShadow",
+}
 DECLARATION = re.compile(r"(?m)^[ \t]*(?:[A-Za-z_]\w*[ \t]+)+([A-Za-z_]\w*)[ \t]*\(")
+DECLARATION_LINE = re.compile(r"(?m)^[ \t]*([A-Za-z_]\w*)[ \t]+[A-Za-z_]\w*")
+
+
+def _iter_declarations(clean: str):
+    """Yields (position, name) for genuine function declarations."""
+    structs = set(re.findall(r"\bstruct\s+([A-Za-z_]\w*)", clean))
+    for match in DECLARATION.finditer(clean):
+        head = DECLARATION_LINE.match(clean, match.start())
+        if not head:
+            continue
+        first = head.group(1)
+        if first not in GLSL_TYPE_NAMES and first not in structs:
+            # `return foo(`, `if (...)`, ... are not declarations.
+            continue
+        name = match.group(1)
+        if name in GLSL_KEYWORDS:
+            continue
+        yield match.start(), name
 
 
 def check_source(path: Path, lines: list[tuple[int, str]], diags: list[Diagnostic], macros: Preprocessor) -> None:
@@ -307,11 +336,8 @@ def check_source(path: Path, lines: list[tuple[int, str]], diags: list[Diagnosti
 
     # --- declarations, with offsets ---------------------------------------
     declared_at: dict[str, list[int]] = {}
-    for match in DECLARATION.finditer(clean):
-        name = match.group(1)
-        if name in GLSL_KEYWORDS:
-            continue
-        declared_at.setdefault(name, []).append(match.start())
+    for position, name in _iter_declarations(clean):
+        declared_at.setdefault(name, []).append(position)
 
     # --- calls must resolve against an earlier declaration -----------------
     reported: set[str] = set()
@@ -406,11 +432,8 @@ def check_call_arity(path: Path, lines: list[tuple[int, str]], diags: list[Diagn
     clean = strip_comments(text)
 
     arities: dict[str, set[int]] = {}
-    for match in DECLARATION.finditer(clean):
-        name = match.group(1)
-        if name in GLSL_KEYWORDS:
-            continue
-        open_paren = clean.find("(", match.end() - 1)
+    for position, name in _iter_declarations(clean):
+        open_paren = clean.find("(", position)
         if open_paren == -1:
             continue
         inner, _ = _read_parens(clean, open_paren)
@@ -441,6 +464,24 @@ def check_call_arity(path: Path, lines: list[tuple[int, str]], diags: list[Diagn
                     f"{name}() called with {count} argument(s), declared with {sorted(arities[name])}",
                 )
             )
+
+
+def check_frame_initialised(path: Path, lines: list[tuple[int, str]], diags: list[Diagnostic]) -> None:
+    """A program that reads MuonFrame must build it first.
+
+    muonFrame is a mutable global filled from the loader uniforms. Reading it
+    before MUON_FRAME_INIT() has run yields indeterminate values, and because
+    the failure is silent (every field just reads as garbage) it is worth a
+    dedicated check.
+    """
+    rel = str(path.relative_to(ROOT))
+    text = "\n".join(line for _, line in lines)
+
+    uses_frame = re.search(r"\bmuonFrame\s*\.", text) is not None
+    builds_frame = "MUON_FRAME_INIT()" in text
+
+    if uses_frame and not builds_frame:
+        diags.append(Diagnostic("error", rel, 0, "reads muonFrame but never calls MUON_FRAME_INIT()"))
 
 
 def check_sampler_usage(path: Path, lines: list[tuple[int, str]], diags: list[Diagnostic]) -> None:
@@ -482,7 +523,7 @@ def check_identifiers(path: Path, lines: list[tuple[int, str]], diags: list[Diag
 
     known: set[str] = set(macros.macros) | set(macros.macro_params)
     known |= set(re.findall(r"\bstruct\s+([A-Za-z_]\w*)", clean))
-    known |= {match.group(1) for match in DECLARATION.finditer(clean)}
+    known |= {name for _, name in _iter_declarations(clean)}
     known |= {match.group(1) for match in DECLARED_NAME.finditer(clean)}
 
     reported: set[str] = set()
@@ -743,6 +784,7 @@ def main() -> int:
         check_identifiers(program, lines, diags, pre)
         check_sampler_usage(program, lines, diags)
         check_call_arity(program, lines, diags, pre)
+        check_frame_initialised(program, lines, diags)
         if program.suffix == ".fsh":
             check_outputs(program, lines, diags)
 

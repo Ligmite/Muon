@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - lib/common/volumetric.glsl
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -204,8 +204,13 @@ vec3 muon_god_rays(vec2 uv, vec3 world_dir, float view_distance, vec3 color_befo
     illumination /= float(MUON_GODRAY_STEPS);
 
     float phase = muon_mie_phase_dual(dot(world_dir, light_dir));
-    vec3 tint = muon_direct_light_color() * (MUON_GODRAY_STRENGTH * illumination * phase);
+    /* The phase function is a distribution, not a radiance. Scaling it by a
+       small constant keeps a shaft visible without letting the forward peak
+       add tens of units of light to the whole screen. */
+    vec3 tint = muon_direct_light_color() * (MUON_GODRAY_STRENGTH * illumination * phase * 0.04);
     tint *= 1.0 + muon_rain_strength() * 1.5;
+
+    tint = min(tint, vec3(1.5));
 
     return tint * (1.0 - muon_saturate(view_distance / max(muonFrame.depthParams.y, 1.0)));
 #endif

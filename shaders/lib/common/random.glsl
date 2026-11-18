@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - lib/common/random.glsl
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -172,7 +172,10 @@ float muon_blue_noise_temporal(vec2 frag_coord, uint frame) {
 /* Interleaved gradient noise: cheap, temporally stable dithering. */
 float muon_interleaved_gradient_noise(vec2 frag_coord) {
     const vec3 magic = vec3(0.06711056, 0.00583715, 52.9829189);
-    return fract(magic.z * fract(dot(frag_coord, magic.xy) + muonFrame.time.x * 0.6180339887));
+    /* Deliberately has no time component: a sampling pattern that changes every
+       frame makes every stochastic effect flicker when the temporal filter is
+       anything less than perfect. */
+    return fract(magic.z * fract(dot(frag_coord, magic.xy)));
 }
 
 #endif // MUON_COMMON_RANDOM_GLSL

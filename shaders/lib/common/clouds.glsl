@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - lib/common/clouds.glsl
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -323,7 +323,7 @@ MuonCloudSample muon_cloud_raymarch(vec3 origin, vec3 direction, float max_dista
  * produce convincing drifting cloud shadows on the terrain.
  */
 float muon_cloud_shadow(vec3 world_pos, vec3 light_dir) {
-#if !defined CLOUD_SHADOWS
+#if !defined CLOUD_SHADOWS || !defined CLOUDS
     return 1.0;
 #else
     MuonCloudWeather w = muon_cloud_weather();
@@ -333,14 +333,19 @@ float muon_cloud_shadow(vec3 world_pos, vec3 light_dir) {
         return 1.0;
     }
 
-    float top = w.bottom + w.thickness;
-    float t_enter = (top - world_pos.y) / max(light_dir.y, 0.02);
+    /* The ray enters the layer at its *base* and leaves at its top; marching
+       from the top upward would sample empty air above the cloud and produce
+       no shadow at all. */
+    float t_enter = (w.bottom - world_pos.y) / max(light_dir.y, 0.02);
     if (t_enter < 0.0) {
         return 1.0;
     }
 
+    /* A shallow sun angle means a much longer path through the layer. */
+    float path_length = w.thickness / max(light_dir.y, 0.15);
+    float step_size = path_length / 8.0;
+
     float optical_depth = 0.0;
-    float step_size = w.thickness / 8.0;
     for (int i = 0; i < 8; i++) {
         vec3 p = world_pos + light_dir * (t_enter + step_size * (float(i) + 0.5));
         optical_depth += muon_cumulus_density(p, w) * step_size;

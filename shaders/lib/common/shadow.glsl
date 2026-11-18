@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - lib/common/shadow.glsl
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -42,9 +42,9 @@
 //  Tuning
 // -----------------------------------------------------------------------------
 
-const float MUON_SHADOW_NORMAL_BIAS = 0.055;
-const float MUON_SHADOW_DEPTH_BIAS = 0.00035;
-const float MUON_SHADOW_MAX_PENUMBRA_TEXELS = 22.0;
+const float MUON_SHADOW_NORMAL_BIAS = 0.20;
+const float MUON_SHADOW_DEPTH_BIAS = 0.0015;
+const float MUON_SHADOW_MAX_PENUMBRA_TEXELS = 10.0;
 const float MUON_SHADOW_MIN_PENUMBRA_TEXELS = 0.85;
 const float MUON_SSRT_THICKNESS = 0.65;
 
@@ -190,7 +190,7 @@ float muon_screen_space_shadow(
             break;
         }
 
-        float scene_distance = muon_linear_depth(texture(depthtex0, uv).r);
+        float scene_distance = muon_linear_depth(texture(depthtex1, uv).r);
         float ray_distance = -sample_pos.z;
 
         if (ray_distance > scene_distance + MUON_SSRT_THICKNESS) {

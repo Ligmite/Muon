@@ -7,6 +7,9 @@
 A proprietary Minecraft shader pack for **Iris** (OpenGL), built to also run on
 **Vitrail** (Vulkan), with first-class **Distant Horizons** and **Voxy** support.
 
+Copyright © 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
+Released under the [Muon Proprietary Licence](LICENSE.txt) — **not** an
+open-source licence. Read the licence before redistributing anything.
 
 </div>
 
@@ -150,7 +153,7 @@ clone never carries generated files:
 ```
 workspace/
 ├── Muon/                     ← the repository (this folder)
-├── release/                  ← build output: Muon-v0.0.1.zip
+├── release/                  ← build output: Muon-v0.1.2.zip
 └── archive/                  ← frozen past releases: v0.0.1/
 ```
 
@@ -158,12 +161,11 @@ Inside the repository:
 
 ```
 Muon/
-├── LICENSE.txt               authoritative proprietary licence
-├── LICENSE.md                the same terms, with explanatory notes
+├── LICENSE.txt               the proprietary licence (the only licence text)
 ├── README.md                 this file
 ├── CHANGELOG.md              release history
 ├── version.json              machine-readable version and target matrix
-├── build.ps1 / build.sh      packaging scripts (produce ../release/Muon-v0.0.1.zip)
+├── build.ps1 / build.sh      packaging scripts (produce ../release/Muon-v0.1.2.zip)
 ├── docs/                     architecture, buffers, options, compatibility
 ├── tools/
 │   ├── validate.py           static pack validator (run it before every release)
@@ -196,7 +198,7 @@ There is nothing to compile: a shader pack is a zip of the `shaders/` directory.
 
 ```powershell
 # Windows
-./build.ps1                # -> ../release/Muon-v0.0.1.zip
+./build.ps1                # -> ../release/Muon-v0.1.2.zip
 ./build.ps1 -Archive       # also freeze a copy into ../archive/v0.0.1/
 
 # Linux / macOS
@@ -208,11 +210,11 @@ The output root defaults to the directory containing the repository. Override it
 with the `MUON_OUTPUT_ROOT` environment variable if you want the artefacts
 somewhere else (CI points it at the checkout).
 
-Then copy `release/Muon-v0.0.1.zip` into `.minecraft/shaderpacks/` and select it
+Then copy `release/Muon-v0.1.2.zip` into `.minecraft/shaderpacks/` and select it
 in **Options → Video Settings → Shader Packs**.
 
 Manual install: copy the whole `shaders/` folder into a zip named
-`Muon-v0.0.1.zip`. Do **not** zip the repository root — the zip must contain
+`Muon-v0.1.2.zip`. Do **not** zip the repository root — the zip must contain
 `shaders/` at its top level.
 
 ### Verifying a checkout
@@ -348,18 +350,16 @@ Iris; on a native backend it re-specialises the pipeline.
 
 ---
 
-## Usage terms (summary)
+## Usage terms
 
-- ✅ Use Muon, including in monetised videos and streams, **with credit**.
-- ✅ Modify it for personal use.
-- ✅ Read and learn from the source.
-- ✅ Include it in a modpack, commercial or not, **with the notice preserved**.
-- ❌ Redistribute Muon or derivatives on creator-monetised platforms (Modrinth,
-  CurseForge) without written permission.
-- ❌ Sell copies of Muon or of derivative works.
+Muon is **not** open source. Its source is published so that it can be studied
+and modified for personal use, not so that it can be republished.
 
-The full terms are in [LICENSE.txt](LICENSE.txt). Where these bullets and the
-licence disagree, the licence governs.
+`LICENSE.txt` is the only licence text and it is the only authority on what is
+permitted. This section deliberately does not paraphrase it — in particular it
+makes no claim about redistribution inside modpacks, commercial or otherwise.
+If you want to redistribute Muon or a derivative in any form, read the licence
+and, where it requires it, ask for written permission first.
 
 ---
 

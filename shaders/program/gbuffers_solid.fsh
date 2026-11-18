@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - program/gbuffers_solid.fsh
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -43,8 +43,9 @@ layout(location = 0) out vec4 out_albedo;
 layout(location = 1) out vec4 out_normal;
 layout(location = 2) out vec4 out_surface;
 layout(location = 3) out vec4 out_lightmap;
+layout(location = 4) out vec4 out_translucent_clear;
 
-/* RENDERTARGETS: 1,2,3,4 */
+/* RENDERTARGETS: 1,2,3,4,11 */
 
 // -----------------------------------------------------------------------------
 //  Material properties
@@ -108,8 +109,21 @@ void main() {
     mat3 tbn = muon_cotangent_frame(normalize(view_normal), view_pos, texcoord);
     vec3 view_tangent = transpose(tbn) * normalize(-view_pos);
 
-    if (muon_material_allows_parallax(material.id)) {
-        surface_uv = muon_parallax_offset(texcoord, view_tangent, albedo_luminance, 1.0, parallax_height);
+    bool parallelogram_ready = muon_material_allows_parallax(material.id) && muon_has_height(texcoord);
+
+    if (parallelogram_ready) {
+        surface_uv = muon_parallax_offset(texcoord, view_tangent, 1.0, parallax_height);
+
+        /* Self-shadowing inside the displaced height field. The result is folded
+           into the albedo because the g-buffer has no free channel for a
+           visibility term, so this is an approximation rather than a true
+           shadow - it reads correctly because a deep crevice is darker in every
+           lighting condition. */
+        /* muon_light_direction() is the active sun-or-moon vector from the frame
+           block, which is available in every stage; the atmosphere helpers are not. */
+        vec3 light_tangent = transpose(tbn) * normalize(muon_world_to_view_dir(muon_light_direction()));
+        float pom_shadow = muon_parallax_shadow(surface_uv, light_tangent, 1.0, parallax_height);
+        material.albedo *= mix(1.0, pom_shadow, 0.85);
     }
 
     /* Alpha test. Iris' own test is disabled for this program, so the discard
@@ -145,4 +159,9 @@ void main() {
     out_normal = vec4(material.normal, muon_encode_smoothness(material.smoothness));
     out_surface = muon_encode_surface(material, linear_depth);
     out_lightmap = muon_encode_lightmap(material);
+
+    /* Clears the translucent marker for this pixel. Translucent geometry runs
+       after opaque geometry and overwrites it, so colortex11.g is a reliable
+       "is there water or glass here" flag that never holds stale data. */
+    out_translucent_clear = vec4(0.0);
 }

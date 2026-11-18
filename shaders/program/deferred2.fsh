@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - program/deferred2.fsh
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -39,7 +39,7 @@ in vec2 texcoord;
 
 layout(location = 0) out vec4 out_scene;
 
-/* RENDERTARGETS: 0 */
+/* RENDERTARGETS: 15 */
 
 // -----------------------------------------------------------------------------
 //  Water
@@ -73,6 +73,12 @@ vec3 muon_shade_water(
     vec3 transmittance = muon_water_transmittance(thickness);
     vec3 refracted = background * transmittance + muon_water_inscatter(thickness);
 
+    /* A share of the water body colour on top of the extinction model. Without
+       it a shallow pond viewed from above is indistinguishable from the ground
+       underneath, which is the difference between "water is subtle" and "water
+       is not rendering". */
+    refracted = mix(refracted, muon_water_body_color(thickness), 0.35);
+
     /* Caustics on the bottom, projected from the surface pattern. */
     float caustics = muon_water_caustics(world_pos.xz, thickness, length(view_pos));
     refracted += material.albedo * (caustics * muon_direct_light_color() * 0.35);
@@ -87,7 +93,8 @@ vec3 muon_shade_water(
         view_dir,
         view_normal,
         material.roughness,
-        dither
+        dither,
+        colortex0
     );
 
     vec3 sky_reflection = muon_sky_radiance(world_reflect_ws, 6);
@@ -112,8 +119,12 @@ void main() {
     MUON_FRAME_INIT();
 
     vec2 uv = texcoord;
-    float opaque_depth = texture(depthtex0, uv).r;
-    float translucent_depth = texture(depthtex1, uv).r;
+    /* depthtex1 is opaque geometry only; depthtex0 includes translucents. The
+       water surface is therefore the *all* buffer, and the bottom is the opaque
+       buffer. Having these the wrong way round made the translucent test
+       impossible to satisfy, so water was never shaded at all. */
+    float opaque_depth = texture(depthtex1, uv).r;
+    float translucent_depth = texture(depthtex0, uv).r;
 
     vec3 color = texture(colortex0, uv).rgb;
     float surface_distance = opaque_depth >= 1.0

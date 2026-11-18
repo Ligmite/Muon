@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - lib/common/atmosphere.glsl
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -99,9 +99,20 @@ float muon_mie_phase(float cos_theta, float g) {
     return num / denom;
 }
 
-/* Dual-lobe Mie phase: a wide lobe for the glow and a tight one for the disc. */
+/*
+ * Dual-lobe Mie phase: a wide lobe for the glow and a tight one for the disc.
+ * The result is bounded because a physical phase function diverges at the
+ * solar limb; the sun disc is drawn separately, so clamping costs nothing
+ * visually and stops the glow from swamping the HDR range.
+ */
+const float MUON_MIE_PHASE_LIMIT = 24.0;
+
 float muon_mie_phase_dual(float cos_theta) {
-    return mix(muon_mie_phase(cos_theta, 0.76), muon_mie_phase(cos_theta, 0.92), 0.35);
+    float phase = mix(muon_mie_phase(cos_theta, 0.76), muon_mie_phase(cos_theta, 0.92), 0.35);
+    /* A hard min() would flatten the peak into a disc with a visible edge.
+       This saturates smoothly instead: equal to the phase for small values,
+       asymptotic to the limit as it diverges at the solar limb. */
+    return MUON_MIE_PHASE_LIMIT * phase / (MUON_MIE_PHASE_LIMIT + phase);
 }
 
 // -----------------------------------------------------------------------------

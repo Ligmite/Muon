@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - lib/common/raytrace.glsl
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -91,7 +91,7 @@ MuonGISample muon_trace_gi_ray(
             break;
         }
 
-        float scene_depth = muon_linear_depth(texture(depthtex0, sample_uv).r);
+        float scene_depth = muon_linear_depth(texture(depthtex1, sample_uv).r);
         float thickness = max(step_size * 2.0, 0.15);
 
         if (ray_depth > scene_depth && ray_depth < scene_depth + thickness) {
@@ -200,7 +200,7 @@ vec3 muon_denoise_gi(sampler2D source, vec2 uv, float center_depth, vec3 center_
             }
 
             vec2 sample_uv = uv + vec2(float(x), float(y)) * texel;
-            float sample_depth = muon_linear_depth(texture(depthtex0, sample_uv).r);
+            float sample_depth = muon_linear_depth(texture(depthtex1, sample_uv).r);
             float depth_delta = abs(sample_depth - center_depth);
             if (depth_delta > 0.35) {
                 continue;

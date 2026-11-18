@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - lib/common/gtao.glsl
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -46,7 +46,7 @@
 
 /* Reconstructs the view-space position of a full-resolution depth sample. */
 vec3 muon_ao_view_pos(vec2 uv) {
-    return muon_view_pos_from_depth(uv, texture(depthtex0, uv).r);
+    return muon_view_pos_from_depth(uv, texture(depthtex1, uv).r);
 }
 
 /*
@@ -94,7 +94,7 @@ float muon_ao_horizon(
             break;
         }
 
-        float scene_depth = texture(depthtex0, sample_uv).r;
+        float scene_depth = texture(depthtex1, sample_uv).r;
         if (scene_depth >= 1.0) {
             continue;
         }
@@ -203,7 +203,7 @@ MuonAO muon_ssao(vec3 view_pos, vec3 view_normal, float radius) {
             continue;
         }
 
-        float scene_distance = muon_linear_depth(texture(depthtex0, sample_uv).r);
+        float scene_distance = muon_linear_depth(texture(depthtex1, sample_uv).r);
         float sample_distance = -sample_pos.z;
 
         if (scene_distance < sample_distance - 0.05) {

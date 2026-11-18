@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - program/final.fsh
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -62,9 +62,11 @@ void main() {
 
 #if defined AUTO_EXPOSURE
     float exposure = texture(colortex12, vec2(0.5)).r;
-    if (!(exposure > 0.0) || isinf(exposure)) {
+    /* Never let a bad read or a broken frame collapse the image to black. */
+    if (!muon_is_finite(exposure) || exposure <= 0.0) {
         exposure = 1.0;
     }
+    exposure = clamp(exposure, 0.05, 32.0);
 #else
     float exposure = exp2(MANUAL_EXPOSURE);
 #endif

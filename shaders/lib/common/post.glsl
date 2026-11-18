@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - lib/common/post.glsl
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -74,15 +74,15 @@ vec3 muon_apply_vignette(vec3 color, vec2 uv) {
 
 vec3 muon_chromatic_aberration(vec2 uv) {
 #if CHROMATIC_ABERRATION == 0
-    return texture(colortex0, uv).rgb;
+    return texture(colortex15, uv).rgb;
 #else
     vec2 centered = uv - vec2(0.5);
     float amount = CHROMATIC_ABERRATION * 0.0016;
     vec2 offset = centered * amount * dot(centered, centered);
 
-    float red = texture(colortex0, uv + offset).r;
-    float green = texture(colortex0, uv).g;
-    float blue = texture(colortex0, uv - offset).b;
+    float red = texture(colortex15, uv + offset).r;
+    float green = texture(colortex15, uv).g;
+    float blue = texture(colortex15, uv - offset).b;
     return vec3(red, green, blue);
 #endif
 }
@@ -98,15 +98,15 @@ vec3 muon_chromatic_aberration(vec2 uv) {
  */
 vec3 muon_sharpen(vec2 uv) {
 #if !defined SHARPEN
-    return texture(colortex0, uv).rgb;
+    return texture(colortex15, uv).rgb;
 #else
     vec2 texel = muon_inv_viewport();
 
-    vec3 center = texture(colortex0, uv).rgb;
-    vec3 north = texture(colortex0, uv + vec2(0.0, texel.y)).rgb;
-    vec3 south = texture(colortex0, uv - vec2(0.0, texel.y)).rgb;
-    vec3 east = texture(colortex0, uv + vec2(texel.x, 0.0)).rgb;
-    vec3 west = texture(colortex0, uv - vec2(texel.x, 0.0)).rgb;
+    vec3 center = texture(colortex15, uv).rgb;
+    vec3 north = texture(colortex15, uv + vec2(0.0, texel.y)).rgb;
+    vec3 south = texture(colortex15, uv - vec2(0.0, texel.y)).rgb;
+    vec3 east = texture(colortex15, uv + vec2(texel.x, 0.0)).rgb;
+    vec3 west = texture(colortex15, uv - vec2(texel.x, 0.0)).rgb;
 
     vec3 min_color = min(min(min(north, south), min(east, west)), center);
     vec3 max_color = max(max(max(north, south), max(east, west)), center);
@@ -184,8 +184,11 @@ vec3 muon_debug_view(vec2 uv) {
     } else if (view == 8) {
         return texture(colortex4, uv).rgb;
     } else if (view == 9) {
-        float material = texture(colortex3, uv).g;
-        return muon_heat_map(material);
+        /* Translucent opacity: bright where water or glass is present. This is
+           the channel that decides whether the intermediate pass shades a
+           pixel, so it is the useful diagnostic for water. */
+        float opacity = texture(colortex11, uv).g;
+        return vec3(opacity * 4.0, opacity * 2.0, 1.0 - opacity);
     } else if (view == 10) {
         float exposure = texture(colortex12, vec2(0.5)).r;
         return vec3(exposure * 0.25);
@@ -206,17 +209,17 @@ vec3 muon_debug_view(vec2 uv) {
  */
 vec3 muon_fxaa(vec2 uv) {
 #if !defined FXAA
-    return texture(colortex0, uv).rgb;
+    return texture(colortex15, uv).rgb;
 #else
     vec2 texel = muon_inv_viewport();
 
-    vec3 center = texture(colortex0, uv).rgb;
+    vec3 center = texture(colortex15, uv).rgb;
     float luma_center = muon_luminance(center);
 
-    float luma_north = muon_luminance(texture(colortex0, uv + vec2(0.0, texel.y)).rgb);
-    float luma_south = muon_luminance(texture(colortex0, uv - vec2(0.0, texel.y)).rgb);
-    float luma_east = muon_luminance(texture(colortex0, uv + vec2(texel.x, 0.0)).rgb);
-    float luma_west = muon_luminance(texture(colortex0, uv - vec2(texel.x, 0.0)).rgb);
+    float luma_north = muon_luminance(texture(colortex15, uv + vec2(0.0, texel.y)).rgb);
+    float luma_south = muon_luminance(texture(colortex15, uv - vec2(0.0, texel.y)).rgb);
+    float luma_east = muon_luminance(texture(colortex15, uv + vec2(texel.x, 0.0)).rgb);
+    float luma_west = muon_luminance(texture(colortex15, uv - vec2(texel.x, 0.0)).rgb);
 
     float luma_min = min(luma_center, min(min(luma_north, luma_south), min(luma_east, luma_west)));
     float luma_max = max(luma_center, max(max(luma_north, luma_south), max(luma_east, luma_west)));
@@ -234,9 +237,9 @@ vec3 muon_fxaa(vec2 uv) {
     direction = clamp(direction * direction_reduce, vec2(-8.0), vec2(8.0)) * texel;
 
     vec3 result = center * 0.5;
-    result += texture(colortex0, uv + direction * (1.0 / 3.0 - 0.5)).rgb * 0.125;
-    result += texture(colortex0, uv + direction * (2.0 / 3.0 - 0.5)).rgb * 0.125;
-    result += texture(colortex0, uv + direction * 0.5).rgb * 0.25;
+    result += texture(colortex15, uv + direction * (1.0 / 3.0 - 0.5)).rgb * 0.125;
+    result += texture(colortex15, uv + direction * (2.0 / 3.0 - 0.5)).rgb * 0.125;
+    result += texture(colortex15, uv + direction * 0.5).rgb * 0.25;
 
     return mix(center, result, FXAA_STRENGTH);
 #endif

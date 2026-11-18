@@ -1,9 +1,9 @@
 {
   "name": "Muon",
-  "version": "0.0.1",
-  "version_string": "v0.0.1",
-  "channel": "alpha",
-  "release_date": "2026-11-11",
+  "version": "0.1.2",
+  "version_string": "v0.1.2",
+  "channel": "beta",
+  "release_date": "2026-11-12",
   "minecraft": "26.3",
   "targets": {
     "iris": ">=1.11.0",
@@ -19,7 +19,15 @@
     "render_targets": 16,
     "default_preset": "High"
   },
-  "presets": ["Low", "Medium", "High", "Ultra", "Raytraced", "RTGI", "PTGI"],
+  "presets": [
+    "Low",
+    "Medium",
+    "High",
+    "Ultra",
+    "Raytraced",
+    "RTGI",
+    "PTGI"
+  ],
   "license": "Muon Proprietary Licence (see LICENSE.txt)",
   "copyright": "Copyright (c) 2026 Keyon Fatemi (\"Ligmite\")"
 }

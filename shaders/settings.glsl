@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - settings.glsl
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   This file is part of Muon, distributed under the Muon Proprietary Licence.
@@ -126,7 +126,7 @@ const float ambientOcclusionLevel   = 0.0;
 #define STARS
 #define STARS_INTENSITY 0.55 // [0.00 0.10 0.20 0.30 0.40 0.50 0.55 0.60 0.70 0.80 0.90 1.00]
 
-#define CLOUDS
+//#define CLOUDS
 #define CLOUD_STEPS 40 // [12 16 20 24 32 40 48 56 64 80 96 128]
 #define CLOUD_LIGHTING_STEPS 6 // [1 2 3 4 5 6 8 10]
 #define CLOUD_ALTITUDE 320.0 // [120.0 180.0 240.0 300.0 320.0 360.0 420.0 500.0 640.0 800.0]
@@ -147,7 +147,7 @@ const float ambientOcclusionLevel   = 0.0;
 #define CAVE_FOG_STRENGTH 0.55 // [0.00 0.10 0.20 0.30 0.40 0.50 0.55 0.60 0.70 0.80 0.90 1.00]
 
 #define GOD_RAYS
-#define GOD_RAYS_STRENGTH 0.65 // [0.00 0.10 0.20 0.30 0.40 0.50 0.60 0.65 0.70 0.80 0.90 1.00 1.20]
+#define GOD_RAYS_STRENGTH 0.45 // [0.00 0.10 0.20 0.30 0.40 0.45 0.50 0.60 0.70 0.80 1.00]
 #define GOD_RAYS_STEPS 20 // [6 8 10 12 16 20 24 32 48]
 
 // -----------------------------------------------------------------------------
@@ -217,6 +217,7 @@ const float ambientOcclusionLevel   = 0.0;
 //  Post-processing
 // -----------------------------------------------------------------------------
 
+//#define TAA_JITTER
 #define TAA
 #define TAA_STRENGTH 0.90 // [0.00 0.20 0.40 0.50 0.60 0.70 0.80 0.85 0.90 0.92 0.94 0.96 0.98]
 #define TAA_CLIPPING 1.00 // [0.00 0.20 0.40 0.50 0.60 0.70 0.80 0.90 1.00 1.20 1.50]
@@ -224,14 +225,14 @@ const float ambientOcclusionLevel   = 0.0;
 #define FXAA
 #define FXAA_STRENGTH 0.75 // [0.00 0.10 0.20 0.30 0.40 0.50 0.60 0.70 0.75 0.80 0.90 1.00]
 
-#define AUTO_EXPOSURE
+//#define AUTO_EXPOSURE
 #define EXPOSURE_BIAS 0.00 // [-2.00 -1.50 -1.00 -0.75 -0.50 -0.25 0.00 0.25 0.50 0.75 1.00 1.50 2.00]
-#define EXPOSURE_MIN -2.50 // [-6.00 -5.00 -4.50 -4.00 -3.50 -3.00 -2.50 -2.00 -1.50 -1.00 -0.50 0.00]
-#define EXPOSURE_MAX 2.50 // [0.00 0.50 1.00 1.50 2.00 2.50 3.00 4.00 5.00 6.00]
-#define EXPOSURE_SPEED 1.00 // [0.10 0.25 0.50 0.75 1.00 1.50 2.00 3.00 4.00]
+#define EXPOSURE_MIN -0.50 // [-2.00 -1.50 -1.00 -0.75 -0.50 -0.35 -0.20 0.00]
+#define EXPOSURE_MAX 0.50 // [0.00 0.20 0.35 0.50 0.75 1.00 1.50 2.00]
+#define EXPOSURE_SPEED 0.35 // [0.10 0.20 0.35 0.50 0.75 1.00 1.50 2.00]
 #define MANUAL_EXPOSURE 0.00 // [-4.00 -3.00 -2.00 -1.50 -1.00 -0.50 0.00 0.50 1.00 1.50 2.00 3.00 4.00]
 
-#define TONEMAP_MODE 0 // [0 1 2]
+#define TONEMAP_MODE 1 // [0 1 2]
 #define TONEMAP_EXPOSURE_PRESCALE 1.00 // [0.50 0.70 0.85 1.00 1.15 1.30 1.50 1.80]
 #define TONEMAP_WHITE_POINT 6.00 // [2.00 3.00 4.00 5.00 6.00 8.00 10.00 16.00]
 
@@ -249,7 +250,7 @@ const float ambientOcclusionLevel   = 0.0;
 #define DOF_HAND_BLUR_STRENGTH 1.00 // [0.00 0.10 0.20 0.30 0.40 0.50 0.60 0.70 0.80 0.90 1.00 1.20 1.40]
 
 #define LENS_FLARE
-#define LENS_FLARE_STRENGTH 0.30 // [0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.35 0.40 0.50 0.60]
+#define LENS_FLARE_STRENGTH 0.15 // [0.00 0.02 0.05 0.08 0.10 0.15 0.20 0.25 0.30 0.40]
 #define LENS_FLARE_GHOSTS 3 // [1 2 3 4 5]
 
 #define COLOR_GRADING
@@ -344,8 +345,8 @@ const float ambientOcclusionLevel   = 0.0;
 // -----------------------------------------------------------------------------
 
 #define MUON_VERSION_MAJOR 0
-#define MUON_VERSION_MINOR 0
-#define MUON_VERSION_PATCH 1
-#define MUON_VERSION_STRING "v0.0.1"
+#define MUON_VERSION_MINOR 1
+#define MUON_VERSION_PATCH 2
+#define MUON_VERSION_STRING "v0.1.2"
 
 #endif // MUON_SETTINGS_GLSL

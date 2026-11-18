@@ -2,7 +2,7 @@
 ================================================================================
 
   Muon Shaders - lib/common/dof.glsl
-  Version 0.0.1
+  Version 0.1.2
 
   Copyright (c) 2026 Keyon Fatemi ("Ligmite"). All rights reserved.
   Part of Muon, distributed under the Muon Proprietary Licence (LICENSE.txt).
@@ -72,14 +72,14 @@ float muon_autofocus(vec2 uv) {
  */
 vec3 muon_dof_gather(vec2 uv, float center_coc, float focus_distance) {
 #if !defined DEPTH_OF_FIELD
-    return texture(colortex0, uv).rgb;
+    return texture(colortex15, uv).rgb;
 #else
     float radius = abs(center_coc) * MUON_DOF_STRENGTH;
     if (radius < 0.35) {
-        return texture(colortex0, uv).rgb;
+        return texture(colortex15, uv).rgb;
     }
 
-    vec3 accumulated = texture(colortex0, uv).rgb;
+    vec3 accumulated = texture(colortex15, uv).rgb;
     float weight_sum = 1.0;
 
     float rotation = muon_interleaved_gradient_noise(gl_FragCoord.xy) * MUON_TAU;
@@ -101,7 +101,7 @@ vec3 muon_dof_gather(vec2 uv, float center_coc, float focus_distance) {
         float weight = 1.0 - muon_saturate(abs(center_coc) - abs(sample_coc)) * 0.06;
         weight *= mix(0.35, 1.0, coc_ratio);
 
-        accumulated += texture(colortex0, sample_uv).rgb * weight;
+        accumulated += texture(colortex15, sample_uv).rgb * weight;
         weight_sum += weight;
     }
 
