@@ -11,7 +11,7 @@ Any person obtaining a copy of this software package ("Muon") may:
 - Redistribute modified portions of Muon with the following exceptions:
     - You may not redistribute Muon or derivative works on platforms that provide direct or indirect monetary compensation to creators (e.g. Modrinth, CurseForge) without my explicit written permission.
     - You may not demand money in exchange for copies of Muon or derivative works without my explicit written permission.
-- Redistribute Muon as part of a (commercial) Modpack.
+    - You may not Redistribute Muon as part of a (commercial) Modpack.
 
 The above copyright notice and this permission notice shall be included in all
 copies or portions of the Software.
